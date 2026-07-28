@@ -45,7 +45,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '24'
           cache: npm
 
       - name: Add the macOS cross targets
@@ -63,7 +63,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
-            libxdo-dev libssl-dev build-essential pkg-config rpm
+            libxdo-dev libssl-dev build-essential pkg-config rpm \
+            libpipewire-0.3-dev libspa-0.2-dev \
+            libxcb1-dev libxcb-render0-dev libxext-dev \
+            libwayland-dev libdbus-1-dev libxkbcommon-dev
 
       - run: npm ci
 
