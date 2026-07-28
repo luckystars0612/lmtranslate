@@ -51,16 +51,51 @@ application is in the foreground — browser, native app, IDE, terminal, PDF vie
 
 ## Install
 
-Grab an installer from `src-tauri/target/release/bundle/` after building, or build and
-run from source:
+One script per platform. Each checks your toolchain, offers to install anything missing,
+builds, and installs the result:
+
+**Windows**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+```
+
+**macOS and Linux**
+
+```sh
+bash scripts/install.sh
+```
+
+Both accept:
+
+| Flag | |
+|---|---|
+| `--dry-run` / `-DryRun` | print every action and change nothing |
+| `--yes` / `-Yes` | don't prompt |
+| `--skip-build` / `-SkipBuild` | install an already-built bundle |
+
+Nothing privileged happens without a prompt or `--yes`, and every command — including
+each `sudo` — is printed before it runs. Start with `--dry-run` if you would rather read
+the plan first.
+
+The scripts pick the native package format for your system (NSIS on Windows, `.deb` on
+Debian/Ubuntu, `.rpm` on Fedora/openSUSE, AppImage elsewhere, `.app` on macOS) rather
+than building every format, so one flaky packager cannot fail an otherwise good build.
+
+<details>
+<summary>Or build by hand</summary>
 
 ```sh
 npm install
 npm run tauri dev        # development, with hot reload
-npm run tauri build      # release binary + MSI/NSIS/DEB/DMG installers
+npm run tauri build      # release binary + installers in src-tauri/target/release/bundle/
 ```
 
+</details>
+
 ### Requirements
+
+The install scripts check all of this for you and offer to fix what is missing.
 
 | | |
 |---|---|
@@ -255,7 +290,8 @@ the gloss rail that binds the original and translated text into one unit.
 
 `assets/logo.svg` is the mark; `node scripts/make-icon.mjs [size] [out]` renders it to
 PNG (a hand-rolled encoder, no image dependency), and `npx tauri icon app-icon.png`
-produces the platform icon set.
+produces the platform icon set. `scripts/install.{sh,ps1}` are the installers and
+`scripts/screenshot.ps1` grabs the screen while developing.
 
 ---
 
@@ -278,5 +314,8 @@ Stated plainly rather than discovered later:
 - **The Wayland backends are the least exercised code here.** They compile only on Linux
   and have not been run against GNOME or KDE.
 - **No streaming**, so the popup shows a loading state until the whole reply arrives.
+- **The installers are verified on Windows and on Linux/apt** (dry-run), and the shell
+  script is syntax-checked. Its macOS branch and its `rpm`/AppImage paths have not been
+  executed.
 - **Milestone 8 — hotkey-free selection detection** (UI Automation, AXUIElement, AT-SPI)
   is not implemented; the hotkey remains the trigger on every platform.
