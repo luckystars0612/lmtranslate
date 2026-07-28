@@ -1,0 +1,175 @@
+name: Release
+
+# Push a tag to publish a release:  git tag v0.1.0 && git push origin v0.1.0
+# Or run manually from the Actions tab to build all three platforms without publishing.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Create a draft release from this run"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing should not hide whether the others work.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            label: linux-x86_64
+            # Built on the oldest sensible runner: glibc and webkit2gtk are
+            # backward-compatible, so a 22.04 build installs on newer distros but not
+            # the other way round.
+            bundles: deb,rpm,appimage
+          - os: windows-latest
+            label: windows-x86_64
+            bundles: nsis,msi
+          - os: macos-latest
+            label: macos-universal
+            # One download for both Apple Silicon and Intel.
+            bundles: app,dmg
+            target: universal-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Add the macOS cross targets
+        if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install the Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev build-essential pkg-config rpm
+
+      - run: npm ci
+
+      - run: cd src-tauri && cargo test --locked
+
+      - name: Build
+        run: npx tauri build ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --bundles ${{ matrix.bundles }}
+
+      # Flatten the bundles into one directory and checksum them. Asset names keep
+      # Tauri's defaults (spaces included) — the installers match on extension and
+      # architecture via the releases API rather than on exact filenames.
+      - name: Collect the bundles
+        shell: bash
+        run: |
+          mkdir -p dist-artifacts
+          find src-tauri/target -type f \
+            \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
+               -o -name '*.dmg' -o -name '*-setup.exe' -o -name '*.msi' \) \
+            -exec cp {} dist-artifacts/ \;
+
+          cd dist-artifacts
+          if [ -z "$(ls -A)" ]; then
+            echo "::error::no bundles were produced"
+            exit 1
+          fi
+          # Written outside the directory first so the glob cannot include it.
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum * > ../sums.txt
+          else
+            shasum -a 256 * > ../sums.txt
+          fi
+          mv ../sums.txt "SHA256SUMS-${{ matrix.label }}.txt"
+          ls -la
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: dist-artifacts/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Merge the checksum files
+        run: |
+          cd artifacts
+          cat SHA256SUMS-*.txt > SHA256SUMS.txt
+          rm SHA256SUMS-*.txt
+          cat SHA256SUMS.txt
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('untagged-{0}', github.run_number) }}
+        run: |
+          # A manual run publishes a draft so nothing is announced by accident.
+          draft=""
+          if [ "${{ github.ref_type }}" != "tag" ]; then
+            draft="--draft"
+          fi
+
+          cat > notes.md <<'NOTES'
+          ## Install
+
+          Pick the file for your system, or let the installer script do it:
+
+          **Windows** — `*-setup.exe`
+          **macOS** — `*.dmg` (universal: Apple Silicon and Intel)
+          **Linux** — `.deb` (Debian/Ubuntu), `.rpm` (Fedora/openSUSE), `.AppImage` (anything else)
+
+          ```sh
+          # macOS / Linux
+          bash scripts/install.sh
+          # Windows
+          powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+          ```
+
+          `SHA256SUMS.txt` lists the checksum of every file; the install scripts verify it.
+
+          ## These builds are not code-signed
+
+          There is no Apple Developer or Windows code-signing certificate behind this
+          project, so the operating system will not vouch for the download:
+
+          - **macOS** will refuse to open the app the first time. Right-click it and choose
+            *Open*, or run `xattr -dr com.apple.quarantine "/Applications/LM Translate.app"`.
+            The install script offers to do this for you.
+          - **Windows** may show a SmartScreen warning. Choose *More info* then
+            *Run anyway*.
+
+          Building from source (`bash scripts/install.sh --from-source`) avoids both
+          prompts, since the binary is then local rather than downloaded.
+          NOTES
+
+          gh release create "$TAG" artifacts/* \
+            --repo "${{ github.repository }}" \
+            --title "LM Translate $TAG" \
+            --notes-file notes.md \
+            $draft

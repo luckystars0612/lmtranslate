@@ -51,8 +51,9 @@ application is in the foreground — browser, native app, IDE, terminal, PDF vie
 
 ## Install
 
-One script per platform. Each checks your toolchain, offers to install anything missing,
-builds, and installs the result:
+Download the package for your system from the
+[latest release](../../releases/latest) — `*-setup.exe` for Windows, `.dmg` for macOS,
+`.deb` / `.rpm` / `.AppImage` for Linux — or let a script pick, verify and install it:
 
 **Windows**
 
@@ -66,36 +67,44 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 bash scripts/install.sh
 ```
 
-Both accept:
+The scripts read the releases API, choose the right format for your system, check the
+download against the published `SHA256SUMS.txt`, and install it. No compiler toolchain
+is involved.
 
 | Flag | |
 |---|---|
 | `--dry-run` / `-DryRun` | print every action and change nothing |
 | `--yes` / `-Yes` | don't prompt |
-| `--skip-build` / `-SkipBuild` | install an already-built bundle |
+| `--version v0.1.0` / `-Version` | install a specific release |
+| `--from-source` / `-FromSource` | build locally instead of downloading |
+| `--skip-build` / `-SkipBuild` | with `--from-source`, reuse existing bundles |
 
 Nothing privileged happens without a prompt or `--yes`, and every command — including
-each `sudo` — is printed before it runs. Start with `--dry-run` if you would rather read
-the plan first.
+each `sudo` — is printed before it runs. Start with `--dry-run` to read the plan first.
+Set `LMTRANSLATE_REPO=owner/repo` to install from a fork.
 
-The scripts pick the native package format for your system (NSIS on Windows, `.deb` on
-Debian/Ubuntu, `.rpm` on Fedora/openSUSE, AppImage elsewhere, `.app` on macOS) rather
-than building every format, so one flaky packager cannot fail an otherwise good build.
+### These builds are not code-signed
 
-<details>
-<summary>Or build by hand</summary>
+There is no Apple Developer or Windows code-signing certificate behind this project, so
+the operating system will not vouch for a download:
+
+- **macOS** refuses to open the app the first time. Right-click it and choose *Open*, or
+  run `xattr -dr com.apple.quarantine "/Applications/LM Translate.app"`. The install
+  script offers to do this for you.
+- **Windows** may show a SmartScreen warning: *More info* → *Run anyway*.
+
+Building from source avoids both prompts, since the binary is then local rather than
+downloaded:
 
 ```sh
-npm install
-npm run tauri dev        # development, with hot reload
-npm run tauri build      # release binary + installers in src-tauri/target/release/bundle/
+bash scripts/install.sh --from-source      # macOS, Linux
+... -File scripts\install.ps1 -FromSource  # Windows
 ```
-
-</details>
 
 ### Requirements
 
-The install scripts check all of this for you and offer to fix what is missing.
+Only for building from source or developing — a downloaded package needs none of it. The
+install scripts check for all of it and offer to fix what is missing.
 
 | | |
 |---|---|
@@ -299,9 +308,23 @@ produces the platform icon set. `scripts/install.{sh,ps1}` are the installers an
 
 ```sh
 cd src-tauri && cargo test    # model-reply parsing, reasoning stripping, endpoint
-                              # construction, cache eviction
+                              # construction, cache eviction, prompt substitution
 npm run build                 # strict TypeScript typecheck + production bundle
 ```
+
+### Releasing
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) builds all three
+platforms in parallel, runs `cargo test` on each, and publishes the bundles plus a
+`SHA256SUMS.txt`:
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+Running the workflow manually from the Actions tab builds everything without publishing,
+which is the cheap way to check a platform you cannot build locally. macOS is built as a
+universal binary, and Linux on Ubuntu 22.04 so the result installs on newer distros too.
 
 ### Known limitations
 
@@ -314,8 +337,12 @@ Stated plainly rather than discovered later:
 - **The Wayland backends are the least exercised code here.** They compile only on Linux
   and have not been run against GNOME or KDE.
 - **No streaming**, so the popup shows a loading state until the whole reply arrives.
-- **The installers are verified on Windows and on Linux/apt** (dry-run), and the shell
-  script is syntax-checked. Its macOS branch and its `rpm`/AppImage paths have not been
-  executed.
+- **The release workflow has never run.** Its YAML parses and the build steps mirror what
+  works locally, but no CI execution has happened yet, so the first tag push is also the
+  first real test of the macOS and Linux builds.
+- **The installers are verified on Windows and on Linux/apt** in dry-run, including the
+  no-release-published path and the releases-API parsing. Their macOS branch and the
+  `rpm`/AppImage install paths have not been executed.
+- **Nothing is code-signed**, so downloads trip Gatekeeper and SmartScreen (see above).
 - **Milestone 8 — hotkey-free selection detection** (UI Automation, AXUIElement, AT-SPI)
   is not implemented; the hotkey remains the trigger on every platform.
