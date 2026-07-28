@@ -94,12 +94,73 @@ the operating system will not vouch for a download:
 - **Windows** may show a SmartScreen warning: *More info* → *Run anyway*.
 
 Building from source avoids both prompts, since the binary is then local rather than
-downloaded:
+downloaded. See [Build the installer yourself](#build-the-installer-yourself) for the
+exact commands.
+
+### Build the installer yourself
+
+You don't need to wait for a GitHub release — the same bundles the release workflow
+produces can be built locally on any of the three platforms. Requires the toolchain
+listed in [Requirements](#requirements).
+
+#### One-time: render the icon set
+
+`tauri build` references specific filenames in `src-tauri/icons/` (`.ico` for Windows,
+`.icns` for macOS, multiple `.png` sizes for Linux). Generate the full set from the
+project logo:
 
 ```sh
-bash scripts/install.sh --from-source      # macOS, Linux
-... -File scripts\install.ps1 -FromSource  # Windows
+node scripts/make-icon.mjs        # writes assets/logo.png from assets/logo.svg
+npx tauri icon app-icon.png        # PNG → platform icon set under src-tauri/icons/
 ```
+
+Skip this step only if `src-tauri/icons/` is already populated.
+
+#### Build the bundle
+
+The install scripts are the easy path: they check the toolchain, offer to install
+missing pieces through `winget` / `brew` / `apt` (with a prompt), build, then run the
+installer on the current machine.
+
+**Windows**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -FromSource
+```
+
+**macOS / Linux**
+
+```sh
+bash scripts/install.sh --from-source
+```
+
+If the toolchain is already in place and you just want the installer file, ask Tauri
+directly. Outputs land in `src-tauri/target/release/bundle/`.
+
+| Platform | Command | Output |
+|---|---|---|
+| Windows (NSIS) | `npx tauri build --bundles nsis` | `nsis\LM Translate_0.1.0_x64-setup.exe` |
+| Windows (MSI) | `npx tauri build --bundles msi` | `msi\LM Translate_0.1.0_x64_en-US.msi` |
+| macOS (universal) | `npx tauri build --bundles dmg --target universal-apple-darwin` | `dmg\LM Translate_0.1.0_universal.dmg` |
+| Linux (deb / rpm / AppImage) | `npx tauri build --bundles deb,rpm,appimage` | `{deb,rpm,appimage}\*` |
+
+`--bundles all` produces every target the current platform supports. Each command
+also runs `npm run build` (strict TypeScript typecheck + production bundle) and the
+Rust release build, which takes a few minutes the first time and is much faster on
+subsequent runs.
+
+Add `-SkipBuild` to the install script to reuse a bundle already in
+`target/release/bundle/`, `-DryRun` to print every action without changing anything,
+or `-Yes` to skip the prompts.
+
+#### Note on the installer's behaviour
+
+The installer drops the app, a Start Menu shortcut, and an uninstaller. It does
+**not** register LM Translate to launch on login — that toggle lives in
+**Settings → Launch on login** and only touches the Windows Run registry key (or the
+macOS LaunchAgent / Linux `.desktop` autostart file on the other platforms) when the
+user flips it on. The autostart plugin is wired in, but the default is off, which is
+the polite choice for a background utility.
 
 ### Requirements
 
