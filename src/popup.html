@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Translation</title>
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/popup.css" />
+  </head>
+  <body>
+    <main class="card" id="card">
+      <header class="bar" data-tauri-drag-region>
+        <span class="meta route" id="route" data-tauri-drag-region>SELECTION</span>
+        <div class="bar-actions">
+          <select
+            class="lang"
+            id="lang"
+            aria-label="Target language"
+            title="Translate into…"
+          ></select>
+          <button class="icon-btn" id="close" aria-label="Close (Esc)" title="Close (Esc)">
+            <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+              <path
+                d="M2.5 2.5l7 7M9.5 2.5l-7 7"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+                fill="none"
+              />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="gloss" id="gloss" data-state="loading">
+        <p class="original" id="original" hidden></p>
+        <p class="translated" id="translated"></p>
+      </div>
+
+      <section class="err" id="err" hidden>
+        <p class="err-title" id="errTitle"></p>
+        <p class="err-detail" id="errDetail"></p>
+        <p class="err-hint" id="errHint" hidden></p>
+      </section>
+
+      <footer class="foot" id="foot" hidden>
+        <span class="meta" id="stat"></span>
+        <div class="foot-actions">
+          <button class="btn" id="openSettings" hidden>Open Settings</button>
+          <button class="btn btn--primary" id="copy">Copy translation</button>
+        </div>
+      </footer>
+    </main>
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>

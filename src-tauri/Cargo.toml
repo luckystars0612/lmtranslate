@@ -1,0 +1,47 @@
+[package]
+name = "lmtranslate"
+version = "0.1.0"
+description = "System-wide translation from a global hotkey"
+edition = "2021"
+rust-version = "1.85"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1.0.104"
+arboard = "3.6.1"
+async-trait = "0.1.91"
+base64 = "0.23.0"
+chrono = "0.4.45"
+enigo = "0.6.1"
+image = { version = "0.25.9", default-features = false, features = ["png"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "charset", "http2", "native-tls"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+# macos-private-api is what makes the transparent popup work on macOS; it is paired
+# with "macOSPrivateApi": true in tauri.conf.json.
+tauri = { version = "2.11.5", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-global-shortcut = "2.3.2"
+tauri-plugin-opener = "2.5.4"
+thiserror = "2.0.19"
+tokio = { version = "1.53.1", features = ["time", "sync", "rt-multi-thread", "macros"] }
+xcap = { version = "0.9.7", features = ["image"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
+
+# Linux only. Wayland sandboxes input injection and screen capture, so both flows need
+# genuinely different backends there: ashpd (xdg-desktop-portal) for capture, and the
+# primary-selection protocol via wl-clipboard-rs for text. x11-clipboard gives X11 the
+# PRIMARY fast path that skips the simulate-copy step entirely.
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = "0.12.3"
+wl-clipboard-rs = "0.9.3"
+x11-clipboard = "0.9.3"
+arboard = { version = "3.6.1", features = ["wl-clipboard-rs"] }

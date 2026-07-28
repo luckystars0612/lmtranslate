@@ -1,0 +1,200 @@
+/* Design tokens — see DESIGN.md.
+   Two accents that carry meaning: --source (cool, the language you had)
+   and --target (warm, the language you wanted). */
+
+:root,
+:root[data-theme="light"] {
+  --bg: #f4f6fa;
+  --surface: #ffffff;
+  --surface-sunk: #eef1f7;
+  --hairline: #dce1ec;
+
+  --text: #171b24;
+  --text-dim: #5a6478;
+  --text-faint: #8b95a8;
+
+  --source: #3d62b8;
+  --target: #a96a05;
+  --danger: #b3261e;
+
+  --shadow: 0 1px 2px rgb(23 27 36 / 8%), 0 12px 32px -8px rgb(23 27 36 / 22%);
+  --overlay-scrim: rgb(12 15 22 / 42%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #171b24;
+    --surface: #1f2531;
+    --surface-sunk: #191e28;
+    --hairline: #303849;
+
+    --text: #e7ebf2;
+    --text-dim: #98a2b6;
+    --text-faint: #6d7789;
+
+    --source: #7c9ce8;
+    --target: #e8a33d;
+    --danger: #f2857c;
+
+    --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 14px 36px -8px rgb(0 0 0 / 60%);
+    --overlay-scrim: rgb(6 8 12 / 55%);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #171b24;
+  --surface: #1f2531;
+  --surface-sunk: #191e28;
+  --hairline: #303849;
+
+  --text: #e7ebf2;
+  --text-dim: #98a2b6;
+  --text-faint: #6d7789;
+
+  --source: #7c9ce8;
+  --target: #e8a33d;
+  --danger: #f2857c;
+
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 14px 36px -8px rgb(0 0 0 / 60%);
+  --overlay-scrim: rgb(6 8 12 / 55%);
+}
+
+:root {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont,
+    ui-sans-serif, system-ui, "Noto Sans", sans-serif;
+  /* The payload face: used for the translated text and nothing else. */
+  --font-payload: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua",
+    Georgia, ui-serif, serif;
+  --font-meta: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
+
+  --r-card: 10px;
+  --r-ctl: 6px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* A `display` rule in a stylesheet outranks the UA's `[hidden] { display: none }`,
+   so without this any element given a display value (.foot is flex, .original is
+   -webkit-box) would stay on screen when the markup marks it hidden. */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Keyboard-driven app: focus is a primary state and is never removed. */
+:where(button, select, input, textarea, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--source);
+  outline-offset: 2px;
+  border-radius: var(--r-ctl);
+}
+
+/* ── The gloss rail ───────────────────────────────────────────────────────────
+   Signature detail. Binds original + translated into one unit, and its gradient
+   runs cool→warm: the translation itself, drawn. Doubles as the loading state. */
+
+.gloss {
+  position: relative;
+  padding-left: 16px;
+}
+
+.gloss::before {
+  content: "";
+  position: absolute;
+  inset-block: 1px;
+  left: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: linear-gradient(
+    180deg,
+    var(--source) 0%,
+    var(--source) 26%,
+    var(--target) 74%,
+    var(--target) 100%
+  );
+}
+
+.gloss[data-state="loading"]::before {
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 30%, #000 70%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, #000 30%, #000 70%, transparent 100%);
+  -webkit-mask-size: 100% 55%;
+  mask-size: 100% 55%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  animation: pour 1.25s ease-in-out infinite;
+}
+
+@keyframes pour {
+  from {
+    -webkit-mask-position: 0 -60%;
+    mask-position: 0 -60%;
+  }
+  to {
+    -webkit-mask-position: 0 160%;
+    mask-position: 0 160%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gloss[data-state="loading"]::before {
+    animation: none;
+    -webkit-mask-image: linear-gradient(180deg, #000 0 50%, transparent 50%);
+    mask-image: linear-gradient(180deg, #000 0 50%, transparent 50%);
+    -webkit-mask-size: 100% 100%;
+    mask-size: 100% 100%;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ── Shared controls ─────────────────────────────────────────────────────── */
+
+.btn {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text);
+  background: var(--surface-sunk);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-ctl);
+  padding: 5px 11px;
+  cursor: pointer;
+}
+
+.btn:hover {
+  border-color: var(--source);
+  color: var(--source);
+}
+
+.btn:active {
+  transform: translateY(0.5px);
+}
+
+.btn--primary {
+  color: var(--surface);
+  background: var(--source);
+  border-color: var(--source);
+}
+
+.btn--primary:hover {
+  color: var(--surface);
+  filter: brightness(1.08);
+}
+
+.meta {
+  font-family: var(--font-meta);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}

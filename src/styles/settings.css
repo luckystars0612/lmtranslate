@@ -1,0 +1,207 @@
+body {
+  background: var(--bg);
+  font-size: 13px;
+}
+
+.page {
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 22px 26px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* Single column, grouped sections — no sidebar for 13 fields. */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.group-title {
+  margin: 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 152px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.row > label {
+  padding-top: 6px;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.inline {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.inline > input {
+  flex: 1 1 200px;
+}
+
+input[type="text"],
+input[type="url"],
+input[type="password"],
+select {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-ctl);
+  padding: 5px 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+input:focus,
+select:focus {
+  border-color: var(--source);
+}
+
+input[type="password"] {
+  font-family: var(--font-meta);
+  letter-spacing: 0.12em;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--source);
+  cursor: pointer;
+}
+
+.note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.status {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.status[data-tone="ok"] {
+  color: var(--source);
+}
+
+.status[data-tone="warn"] {
+  color: var(--target);
+}
+
+.status[data-tone="bad"] {
+  color: var(--danger);
+}
+
+.status[data-tone="busy"] {
+  color: var(--text-faint);
+}
+
+/* Hotkey picker: reads as a key cap, becomes an input while recording. */
+.hotkey {
+  font-family: var(--font-meta);
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-bottom-width: 2px;
+  border-radius: var(--r-ctl);
+  padding: 5px 10px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.hotkey:hover {
+  border-color: var(--source);
+}
+
+.hotkey[data-recording="true"] {
+  color: var(--target);
+  border-color: var(--target);
+  border-style: dashed;
+  border-bottom-width: 1px;
+}
+
+.platform {
+  margin: 0;
+  padding-top: 6px;
+  font-family: var(--font-meta);
+  font-size: 11.5px;
+  color: var(--text);
+}
+
+.notes {
+  margin: 0;
+  padding-left: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.notes li::marker {
+  color: var(--target);
+}
+
+.log {
+  margin: 0;
+  height: 148px;
+  overflow: auto;
+  padding: 8px 10px;
+  font-family: var(--font-meta);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-dim);
+  background: var(--surface-sunk);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-ctl);
+}
+
+.page-foot {
+  padding-top: 4px;
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  justify-content: flex-end;
+}
+
+#saveState {
+  text-transform: uppercase;
+}

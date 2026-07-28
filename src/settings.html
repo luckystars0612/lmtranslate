@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>LM Translate — Settings</title>
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/settings.css" />
+  </head>
+  <body>
+    <main class="page">
+      <!-- Provider ------------------------------------------------------- -->
+      <section class="group">
+        <h2 class="group-title meta">Provider</h2>
+
+        <div class="row">
+          <label for="provider">Provider</label>
+          <select id="provider"></select>
+        </div>
+
+        <div class="row">
+          <label for="baseUrl">Base URL</label>
+          <input id="baseUrl" type="url" spellcheck="false" autocomplete="off" />
+        </div>
+
+        <div class="row">
+          <label for="model">Model name</label>
+          <input id="model" type="text" spellcheck="false" autocomplete="off" />
+        </div>
+
+        <div class="row">
+          <label for="apiKey">API key</label>
+          <div class="field-stack">
+            <div class="inline">
+              <input
+                id="apiKey"
+                type="password"
+                spellcheck="false"
+                autocomplete="off"
+                placeholder="Paste your key"
+              />
+              <button class="btn" id="revealKey" type="button" aria-pressed="false">
+                Show
+              </button>
+              <button class="btn" id="testConn" type="button">Test connection</button>
+            </div>
+            <p class="status" id="connStatus" hidden></p>
+            <p class="note">
+              Stored locally in your config file. Never logged, and only ever sent to the
+              Base URL above.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Translation ---------------------------------------------------- -->
+      <section class="group">
+        <h2 class="group-title meta">Translation</h2>
+
+        <div class="row">
+          <label for="targetLang">Target language</label>
+          <div class="field-stack">
+            <input
+              id="targetLang"
+              list="langList"
+              type="text"
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <datalist id="langList"></datalist>
+            <p class="note">Pick from the list or type any language name.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Hotkeys -------------------------------------------------------- -->
+      <section class="group">
+        <h2 class="group-title meta">Hotkeys</h2>
+
+        <div class="row">
+          <label for="hkText">Select and translate</label>
+          <div class="field-stack">
+            <button class="hotkey" id="hkText" type="button"></button>
+            <p class="status" id="hkTextStatus" hidden></p>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="hkShot">Screenshot and translate</label>
+          <div class="field-stack">
+            <button class="hotkey" id="hkShot" type="button"></button>
+            <p class="status" id="hkShotStatus" hidden></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Behaviour ------------------------------------------------------ -->
+      <section class="group">
+        <h2 class="group-title meta">Behaviour</h2>
+
+        <div class="row">
+          <label for="autoClose">Popup</label>
+          <select id="autoClose">
+            <option value="0">Stay until dismissed</option>
+            <option value="5000">Close after 5 seconds</option>
+            <option value="10000">Close after 10 seconds</option>
+            <option value="20000">Close after 20 seconds</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label for="theme">Theme</label>
+          <select id="theme">
+            <option value="system">Match system</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label for="launchOnLogin">Startup</label>
+          <label class="check">
+            <input id="launchOnLogin" type="checkbox" />
+            <span>Launch LM Translate when I log in</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- Advanced ------------------------------------------------------- -->
+      <section class="group">
+        <h2 class="group-title meta">Advanced</h2>
+
+        <div class="row">
+          <label>This system</label>
+          <div class="field-stack">
+            <p class="platform" id="platform"></p>
+            <ul class="notes" id="platformNotes"></ul>
+            <p id="a11yRow" hidden>
+              <button class="btn" id="openA11y" type="button">
+                Open Privacy &amp; Security → Accessibility
+              </button>
+            </p>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="log">Debug log</label>
+          <div class="field-stack">
+            <pre class="log" id="log" tabindex="0"></pre>
+            <div class="inline">
+              <button class="btn" id="refreshLog" type="button">Refresh</button>
+              <button class="btn" id="clearLog" type="button">Clear log</button>
+              <button class="btn" id="openLogDir" type="button">Show file</button>
+            </div>
+            <p class="note">Request and response metadata only — never your API key.</p>
+          </div>
+        </div>
+      </section>
+
+      <footer class="page-foot">
+        <span class="meta" id="saveState">LOADING…</span>
+      </footer>
+    </main>
+    <script type="module" src="./settings.ts"></script>
+  </body>
+</html>

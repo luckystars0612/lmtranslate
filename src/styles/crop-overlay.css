@@ -1,0 +1,93 @@
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  cursor: crosshair;
+  user-select: none;
+}
+
+/* Full-screen dim, present until a drag starts. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-scrim);
+}
+
+body[data-dragging="true"] .scrim {
+  display: none;
+}
+
+/* Once dragging, the selection punches a hole in the dim via an outsized shadow. */
+.marquee {
+  position: fixed;
+  border: 1px solid var(--target);
+  box-shadow: 0 0 0 100vmax var(--overlay-scrim);
+  pointer-events: none;
+}
+
+.readout {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--target);
+  color: #14161c;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+/* Flip the readout inside the selection when it would fall off the bottom edge. */
+.marquee[data-flip="true"] .readout {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 5px;
+}
+
+.hint {
+  position: fixed;
+  left: 50%;
+  top: 38%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+  animation: fade-in 160ms ease-out;
+}
+
+body[data-dragging="true"] .hint {
+  display: none;
+}
+
+.hint-sep {
+  margin: 0 8px;
+  color: var(--text-faint);
+}
+
+kbd {
+  font-family: var(--font-meta);
+  font-size: 11px;
+  padding: 1px 5px;
+  border: 1px solid var(--hairline);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface-sunk);
+  color: var(--text);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}

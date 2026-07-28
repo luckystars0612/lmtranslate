@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Select a region</title>
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/crop-overlay.css" />
+  </head>
+  <body>
+    <div class="scrim" id="scrim"></div>
+    <div class="marquee" id="marquee" hidden>
+      <span class="readout meta" id="readout"></span>
+    </div>
+    <p class="hint" id="hint">
+      Drag to select a region<span class="hint-sep">·</span
+      ><kbd>Esc</kbd> or right-click to cancel
+    </p>
+    <script type="module" src="./crop-overlay.ts"></script>
+  </body>
+</html>

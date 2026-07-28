@@ -1,0 +1,204 @@
+/* The popup is a single dense card in a transparent window.
+   The window carries 10px of padding so the card's shadow has room to render. */
+
+html,
+body {
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+}
+
+body {
+  padding: 10px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow);
+  padding: 10px 12px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  animation: rise 130ms cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+/* ── Route bar ───────────────────────────────────────────────────────────── */
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+}
+
+.route {
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The arrow in "SELECTION → VIETNAMESE" is tinted warm: it points at the target. */
+.route b {
+  font-weight: inherit;
+  color: var(--target);
+}
+
+.bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.lang {
+  font-family: var(--font-meta);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  padding: 2px 4px;
+  max-width: 130px;
+  cursor: pointer;
+}
+
+.lang:hover {
+  border-color: var(--hairline);
+  color: var(--target);
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--text-faint);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  color: var(--text);
+  background: var(--surface-sunk);
+  border-color: var(--hairline);
+}
+
+/* ── The glossed pair ────────────────────────────────────────────────────── */
+
+/* Bounds how tall the window can grow; a very long translation scrolls in place. */
+.gloss {
+  max-height: 340px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.original {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  user-select: text;
+  cursor: text;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* The translation is the payload: reading face, full size, never clamped. */
+.translated {
+  margin: 0;
+  font-family: var(--font-payload);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--text);
+  user-select: text;
+  cursor: text;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.gloss[data-state="loading"] .translated {
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* ── Error state ─────────────────────────────────────────────────────────── */
+
+/* The error state keeps the rail — in danger red — so the card stays recognisably
+   this app's popup rather than turning into a generic alert box. */
+.err {
+  position: relative;
+  padding-left: 16px;
+  user-select: text;
+}
+
+.err::before {
+  content: "";
+  position: absolute;
+  inset-block: 1px;
+  left: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--danger);
+}
+
+.err-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.err-detail {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.err-hint {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+}
+
+.foot-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}

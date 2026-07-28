@@ -1,0 +1,602 @@
+//! End-to-end orchestration for both triggers.
+//!
+//! `capture/` knows how to get bytes off the screen and `translate/` knows how to turn
+//! them into a translation; this module is the glue that sequences them against the
+//! popup, the debounce guard and the log.
+
+use std::time::{Duration, Instant};
+
+use tauri::{AppHandle, Manager};
+
+use crate::capture;
+use crate::config::{self, Settings, REQUEST_TIMEOUT_SECS};
+use crate::platform::CaptureError;
+use crate::state::AppState;
+use crate::translate::types::{InputKind, ProviderError, TranslateRequest};
+use crate::windows::popup_window::{self, Anchor, PopupState};
+use crate::windows::crop_overlay;
+
+/// Slack on top of the HTTP client's own timeout, so the client reports first.
+const OVERALL_TIMEOUT_SECS: u64 = REQUEST_TIMEOUT_SECS + 5;
+/// Give the compositor time to actually stop drawing the overlays before capturing.
+const OVERLAY_TEARDOWN_GRACE: Duration = Duration::from_millis(70);
+const OVERLAY_TEARDOWN_LIMIT: Duration = Duration::from_millis(700);
+
+// ── Flow 1: select and translate ───────────────────────────────────────────
+
+pub fn start_text_flow(app: AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+
+    // Debounce: a second press while a request is in flight is ignored rather than
+    // stacking another request behind it.
+    if !state.begin_flight() {
+        state
+            .logger
+            .info("select-and-translate ignored: a translation is already running");
+        return;
+    }
+
+    let generation = state.next_generation();
+    let settings = state.settings_snapshot();
+    drop(state);
+
+    tauri::async_runtime::spawn(text_flow(app, generation, settings));
+}
+
+async fn text_flow(app: AppHandle, generation: u64, settings: Settings) {
+    // A popup left over from an earlier translation may still hold focus, and the
+    // synthetic Ctrl+C has to reach the user's application rather than us.
+    {
+        let app = app.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            popup_window::close_and_settle(&app);
+        })
+        .await;
+    }
+
+    let anchor = popup_window::cursor_anchor(&app);
+    popup_window::show(&app, anchor, PopupState::loading(&settings, "text"));
+
+    let grab = {
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let state = app.state::<AppState>();
+            capture::text_selection::grab_selected_text(state.platform.as_ref())
+        })
+        .await
+    };
+
+    let text = match grab {
+        Ok(Ok(text)) => text,
+        Ok(Err(error)) => {
+            let (title, detail, hint, fixable) = describe_capture_error(&error, "text");
+            log_warn(&app, &format!("selection capture failed: {error}"));
+            let mut popup = PopupState::error(&settings, "text", title, detail, hint);
+            if fixable {
+                popup = popup.offering_settings();
+            }
+            settle(&app, generation, popup, &settings, false);
+            return;
+        }
+        Err(join_error) => {
+            log_error(&app, &format!("capture task panicked: {join_error}"));
+            settle(
+                &app,
+                generation,
+                PopupState::error(
+                    &settings,
+                    "text",
+                    "Could not read the selection",
+                    join_error.to_string(),
+                    "Try again; if it keeps happening, check the debug log in Settings.",
+                ),
+                &settings,
+                false,
+            );
+            return;
+        }
+    };
+
+    // The copy is done, so it is now safe to take focus — Esc and the copy button
+    // both need it.
+    popup_window::focus(&app);
+    popup_window::update(
+        &app,
+        PopupState::loading_with_original(&settings, "text", text.clone()),
+    );
+
+    run_translation(app, generation, InputKind::Text(text), "text", settings).await;
+}
+
+// ── Flow 2: screenshot and translate ───────────────────────────────────────
+
+pub fn start_screenshot_flow(app: AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+
+    let settings = state.settings_snapshot();
+    let supports_image = state
+        .provider_snapshot()
+        .map(|p| p.supports_image_input())
+        .unwrap_or(false);
+
+    if !supports_image {
+        let meta = settings.active_meta();
+        drop(state);
+        let anchor = popup_window::cursor_anchor(&app);
+        popup_window::show(
+            &app,
+            anchor,
+            PopupState::error(
+                &settings,
+                "image",
+                "This provider cannot read images",
+                format!("{} is configured as text-only.", meta.label),
+                "Pick a vision-capable model in Settings -> Provider.",
+            )
+            .offering_settings(),
+        );
+        popup_window::focus(&app);
+        return;
+    }
+
+    if !state.begin_overlay() {
+        return;
+    }
+    drop(state);
+
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        // The overlay must be the topmost thing on screen.
+        popup_window::close(&handle);
+
+        match crop_overlay::open_all(&handle) {
+            Ok(0) | Err(_) => {
+                log_error(&handle, "could not open the crop overlay on any monitor");
+                if let Some(state) = handle.try_state::<AppState>() {
+                    state.end_overlay();
+                }
+            }
+            Ok(count) => log_info(&handle, &format!("crop overlay open on {count} monitor(s)")),
+        }
+    });
+}
+
+pub fn cancel_crop(app: AppHandle) {
+    crop_overlay::close_all(&app);
+    if let Some(state) = app.try_state::<AppState>() {
+        state.end_overlay();
+    }
+}
+
+/// `x`/`y`/`width`/`height` arrive in the reporting overlay's own CSS pixels.
+pub fn handle_crop(app: AppHandle, label: String, x: f64, y: f64, width: f64, height: f64) {
+    // Read the overlay's real geometry before tearing it down. Doing the conversion
+    // here rather than in JS keeps mixed-DPI multi-monitor setups correct.
+    let geometry = app.get_webview_window(&label).and_then(|window| {
+        let scale = window.scale_factor().ok()?;
+        let origin = window.outer_position().ok()?;
+        Some((origin.x as f64, origin.y as f64, scale))
+    });
+
+    let Some((origin_x, origin_y, scale)) = geometry else {
+        cancel_crop(app);
+        return;
+    };
+
+    let physical_x = origin_x + x * scale;
+    let physical_y = origin_y + y * scale;
+    let physical_w = (width * scale).round().max(0.0) as u32;
+    let physical_h = (height * scale).round().max(0.0) as u32;
+
+    crop_overlay::close_all(&app);
+
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    state.end_overlay();
+
+    if !state.begin_flight() {
+        return;
+    }
+    let generation = state.next_generation();
+    let settings = state.settings_snapshot();
+    drop(state);
+
+    tauri::async_runtime::spawn(screenshot_flow(
+        app,
+        generation,
+        settings,
+        (
+            physical_x.round() as i32,
+            physical_y.round() as i32,
+            physical_w,
+            physical_h,
+        ),
+    ));
+}
+
+async fn screenshot_flow(
+    app: AppHandle,
+    generation: u64,
+    settings: Settings,
+    region: (i32, i32, u32, u32),
+) {
+    let (x, y, width, height) = region;
+
+    // Capture happens *before* the popup opens. The popup would otherwise be on
+    // screen while the shot is taken and could end up inside it.
+    wait_for_overlays_to_vanish(&app).await;
+
+    let captured = {
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let state = app.state::<AppState>();
+            capture::screenshot::capture_region(state.platform.as_ref(), x, y, width, height)
+        })
+        .await
+    };
+
+    let anchor = Anchor {
+        x: x as f64,
+        y: (y + height as i32) as f64,
+    };
+
+    let base64_png = match captured {
+        Ok(Ok(data)) => data,
+        Ok(Err(error)) => {
+            let (title, detail, hint, fixable) = describe_capture_error(&error, "image");
+            log_warn(&app, &format!("screen capture failed: {error}"));
+            let mut popup = PopupState::error(&settings, "image", title, detail, hint);
+            if fixable {
+                popup = popup.offering_settings();
+            }
+            popup_window::show(&app, anchor, popup);
+            popup_window::focus(&app);
+            end_flight(&app);
+            return;
+        }
+        Err(join_error) => {
+            log_error(&app, &format!("capture task panicked: {join_error}"));
+            popup_window::show(
+                &app,
+                anchor,
+                PopupState::error(
+                    &settings,
+                    "image",
+                    "Could not capture the screen",
+                    join_error.to_string(),
+                    "Try again; if it keeps happening, check the debug log in Settings.",
+                ),
+            );
+            end_flight(&app);
+            return;
+        }
+    };
+
+    log_info(
+        &app,
+        &format!("captured {width}x{height} region ({} base64 bytes)", base64_png.len()),
+    );
+
+    popup_window::show(&app, anchor, PopupState::loading(&settings, "image"));
+    popup_window::focus(&app);
+
+    run_translation(
+        app,
+        generation,
+        InputKind::ImageBase64(base64_png),
+        "image",
+        settings,
+    )
+    .await;
+}
+
+async fn wait_for_overlays_to_vanish(app: &AppHandle) {
+    let deadline = Instant::now() + OVERLAY_TEARDOWN_LIMIT;
+    loop {
+        let still_open = app
+            .webview_windows()
+            .keys()
+            .any(|label| crop_overlay::is_overlay(label));
+        if !still_open || Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(15)).await;
+    }
+    tokio::time::sleep(OVERLAY_TEARDOWN_GRACE).await;
+}
+
+// ── Re-running with a different target language ────────────────────────────
+
+pub fn retranslate(app: AppHandle, target_lang: String) -> Result<(), String> {
+    let target_lang = target_lang.trim().to_string();
+    if target_lang.is_empty() {
+        return Err("Pick a language first.".into());
+    }
+
+    let Some(state) = app.try_state::<AppState>() else {
+        return Err("The app is shutting down.".into());
+    };
+
+    let input = state
+        .last_input
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .ok_or_else(|| "There is nothing to translate again.".to_string())?;
+
+    if !state.begin_flight() {
+        return Err("A translation is already running.".into());
+    }
+
+    // Switching language in the popup sticks — it becomes the new default.
+    let settings = {
+        let mut guard = state
+            .settings
+            .write()
+            .map_err(|_| "settings are locked".to_string())?;
+        guard.target_lang = target_lang;
+        guard.clone()
+    };
+    if let Err(e) = config::save(&state.config_path, &settings) {
+        state.logger.warn(format!("could not persist settings: {e}"));
+    }
+
+    let generation = state.next_generation();
+    drop(state);
+
+    let source_kind = match input {
+        InputKind::Text(_) => "text",
+        InputKind::ImageBase64(_) => "image",
+    };
+    let original = match &input {
+        InputKind::Text(text) => text.clone(),
+        InputKind::ImageBase64(_) => popup_window::snapshot(&app).original,
+    };
+
+    popup_window::update(
+        &app,
+        PopupState::loading_with_original(&settings, source_kind, original),
+    );
+
+    tauri::async_runtime::spawn(run_translation(
+        app,
+        generation,
+        input,
+        source_kind,
+        settings,
+    ));
+
+    Ok(())
+}
+
+// ── Shared translation step ────────────────────────────────────────────────
+
+async fn run_translation(
+    app: AppHandle,
+    generation: u64,
+    input: InputKind,
+    source_kind: &'static str,
+    settings: Settings,
+) {
+    let started = Instant::now();
+    let kind = input.label();
+    let magnitude = input.magnitude();
+
+    let original_display = match &input {
+        InputKind::Text(text) => text.clone(),
+        InputKind::ImageBase64(_) => String::new(),
+    };
+
+    let provider = {
+        let Some(state) = app.try_state::<AppState>() else {
+            return;
+        };
+        if let Ok(mut slot) = state.last_input.lock() {
+            *slot = Some(input.clone());
+        }
+        state.provider_snapshot()
+    };
+
+    let Some(provider) = provider else {
+        settle(
+            &app,
+            generation,
+            PopupState::error(
+                &settings,
+                source_kind,
+                "No provider configured",
+                "LM Translate has no active translation provider.",
+                "Pick one in Settings -> Provider.",
+            )
+            .offering_settings(),
+            &settings,
+            false,
+        );
+        return;
+    };
+
+    // Metadata only — never the API key, never the text being translated.
+    log_info(
+        &app,
+        &format!(
+            "translate start kind={kind} size={magnitude} target={} provider={}",
+            settings.target_lang, settings.provider
+        ),
+    );
+
+    let request = TranslateRequest {
+        input,
+        target_lang: settings.target_lang.clone(),
+    };
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(OVERALL_TIMEOUT_SECS),
+        provider.translate(request),
+    )
+    .await
+    .unwrap_or_else(|_| Err(ProviderError::Timeout(OVERALL_TIMEOUT_SECS)));
+
+    let elapsed_ms = started.elapsed().as_millis();
+
+    match outcome {
+        Ok(response) => {
+            let translated = response.joined_translated();
+            let original = if source_kind == "image" {
+                response.joined_original()
+            } else {
+                original_display
+            };
+
+            log_info(
+                &app,
+                &format!(
+                    "translate ok kind={kind} segments={} chars={} raw={}B in {elapsed_ms}ms",
+                    response.segments.len(),
+                    translated.chars().count(),
+                    response.raw_model_output.len()
+                ),
+            );
+
+            if translated.trim().is_empty() {
+                settle(
+                    &app,
+                    generation,
+                    PopupState::error(
+                        &settings,
+                        source_kind,
+                        "Nothing came back",
+                        "The model returned an empty translation.",
+                        "Try again, or pick a different model in Settings -> Provider.",
+                    )
+                    .offering_settings(),
+                    &settings,
+                    false,
+                );
+                return;
+            }
+
+            settle(
+                &app,
+                generation,
+                PopupState::result(&settings, source_kind, original, translated),
+                &settings,
+                true,
+            );
+        }
+        Err(error) => {
+            log_warn(
+                &app,
+                &format!("translate failed kind={kind} after {elapsed_ms}ms: {error}"),
+            );
+            // Every ProviderError hint points at Settings, so all of them get the button.
+            let (title, detail, hint) = error.user_facing();
+            settle(
+                &app,
+                generation,
+                PopupState::error(&settings, source_kind, title, detail, hint)
+                    .offering_settings(),
+                &settings,
+                false,
+            );
+        }
+    }
+}
+
+/// Puts the final state on screen (unless the popup has moved on) and releases the
+/// in-flight guard.
+fn settle(
+    app: &AppHandle,
+    generation: u64,
+    state_out: PopupState,
+    settings: &Settings,
+    schedule_close: bool,
+) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if state.is_current(generation) {
+            popup_window::update(app, state_out);
+            if schedule_close {
+                schedule_auto_close(app, generation, settings.popup_auto_close_ms);
+            }
+        }
+        state.end_flight();
+    }
+}
+
+fn end_flight(app: &AppHandle) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.end_flight();
+    }
+}
+
+fn schedule_auto_close(app: &AppHandle, generation: u64, delay_ms: u64) {
+    if delay_ms == 0 {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        let Some(state) = app.try_state::<AppState>() else {
+            return;
+        };
+        // Any interaction with the popup cancels the timer.
+        if state.is_current(generation) && !state.popup_was_kept() {
+            popup_window::close(&app);
+        }
+    });
+}
+
+/// (title, detail, hint, is-fixable-in-settings)
+fn describe_capture_error(
+    error: &CaptureError,
+    source_kind: &str,
+) -> (String, String, String, bool) {
+    match error {
+        CaptureError::EmptySelection if source_kind == "image" => (
+            "Nothing to capture".into(),
+            "That region was empty or off-screen.".into(),
+            "Press the hotkey again and drag across the text you want.".into(),
+            false,
+        ),
+        CaptureError::EmptySelection => (
+            "No text selected".into(),
+            "Nothing was highlighted when the hotkey was pressed.".into(),
+            "Select some text first, then press the hotkey again.".into(),
+            false,
+        ),
+        CaptureError::Unsupported(detail) => (
+            "Not supported on this session".into(),
+            detail.clone(),
+            "Settings -> Advanced lists what this session can do.".into(),
+            true,
+        ),
+        CaptureError::Backend(detail) => (
+            "Capture failed".into(),
+            detail.clone(),
+            "Try again; the debug log in Settings has the details.".into(),
+            true,
+        ),
+    }
+}
+
+fn log_info(app: &AppHandle, message: &str) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.logger.info(message);
+    }
+}
+
+fn log_warn(app: &AppHandle, message: &str) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.logger.warn(message);
+    }
+}
+
+fn log_error(app: &AppHandle, message: &str) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.logger.error(message);
+    }
+}
