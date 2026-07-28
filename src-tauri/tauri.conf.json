@@ -3,7 +3,7 @@
   "productName": "LM Translate",
   "mainBinaryName": "lmtranslate",
   "version": "0.1.0",
-  "identifier": "vn.vinsoc.lmtranslate",
+  "identifier": "com.lmtranslate.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",

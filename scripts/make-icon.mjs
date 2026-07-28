@@ -1,14 +1,22 @@
-// Generates app-icon.png — the source image for `npm run tauri icon`.
-// The mark is the gloss rail from DESIGN.md: a cool→warm bar binding a block of
-// "source" lines above a block of "target" lines.
+// Generates the raster form of the logo — the source image for `npm run tauri icon`,
+// and the copy the README displays. The mark is the gloss rail from DESIGN.md: a
+// cool→warm bar binding a block of "source" lines above a block of "target" lines.
+// assets/logo.svg is the same mark, hand-written.
 //
 // Written as a tiny hand-rolled PNG encoder so the build needs no image library.
+//
+//   node scripts/make-icon.mjs                        -> app-icon.png at 1024px
+//   node scripts/make-icon.mjs 512 assets/logo.png    -> any size, any path
 
 import { deflateSync } from "node:zlib";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const S = 1024;
+const [sizeArg, outArg] = process.argv.slice(2);
+const S = Number(sizeArg) || 1024;
+// The geometry below is authored against a 1024 grid, so scale every coordinate.
+const K = S / 1024;
 const px = new Uint8Array(S * S * 4);
 
 const BG = [0x17, 0x1b, 0x24];
@@ -55,19 +63,25 @@ function roundRect(x, y, w, h, r, colorAt, alpha = 1) {
   }
 }
 
+/** Draws a rect given in 1024-grid coordinates at the requested output size. */
+const scaled = (x, y, w, h, r, colorAt, alpha) =>
+  roundRect(x * K, y * K, w * K, h * K, r * K, colorAt, alpha);
+
 // Ground
-roundRect(0, 0, S, S, 224, () => BG);
+scaled(0, 0, 1024, 1024, 224, () => BG);
 
 // The rail: cool at the top, warm at the bottom.
 const RAIL_Y = 236;
 const RAIL_H = 552;
-roundRect(232, RAIL_Y, 40, RAIL_H, 20, (_x, y) => lerp(SOURCE, TARGET, (y - RAIL_Y) / RAIL_H));
+scaled(232, RAIL_Y, 40, RAIL_H, 20, (_x, y) =>
+  lerp(SOURCE, TARGET, (y / K - RAIL_Y) / RAIL_H),
+);
 
 // Source lines (muted, cool) above target lines (bright, warm).
-roundRect(328, 300, 470, 52, 26, () => SOURCE, 0.5);
-roundRect(328, 376, 322, 52, 26, () => SOURCE, 0.5);
-roundRect(328, 596, 470, 52, 26, () => TARGET, 0.95);
-roundRect(328, 672, 386, 52, 26, () => TARGET, 0.95);
+scaled(328, 300, 470, 52, 26, () => SOURCE, 0.5);
+scaled(328, 376, 322, 52, 26, () => SOURCE, 0.5);
+scaled(328, 596, 470, 52, 26, () => TARGET, 0.95);
+scaled(328, 672, 386, 52, 26, () => TARGET, 0.95);
 
 // ── PNG encoding ───────────────────────────────────────────────────────────
 
@@ -113,6 +127,10 @@ const png = Buffer.concat([
   chunk("IEND", Buffer.alloc(0)),
 ]);
 
-const out = fileURLToPath(new URL("../app-icon.png", import.meta.url));
+const out = outArg
+  ? fileURLToPath(new URL(`../${outArg}`, import.meta.url))
+  : fileURLToPath(new URL("../app-icon.png", import.meta.url));
+
+mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, png);
 console.log(`wrote ${out} (${S}×${S}, ${png.length} bytes)`);

@@ -7,6 +7,7 @@ use tauri_plugin_global_shortcut::Shortcut;
 use crate::config::Settings;
 use crate::logger::Logger;
 use crate::platform::PlatformCapture;
+use crate::translate::cache::TranslationCache;
 use crate::translate::provider::TranslateProvider;
 use crate::translate::types::InputKind;
 use crate::windows::popup_window::{Anchor, PopupState};
@@ -31,6 +32,8 @@ pub struct AppState {
     pub popup_anchor: Mutex<Option<Anchor>>,
     /// Retained so the popup's language dropdown can re-run the same input.
     pub last_input: Mutex<Option<InputKind>>,
+    /// Text translations from this session, so a repeat is instant.
+    pub cache: Mutex<TranslationCache>,
 
     /// Debounce: one translation in flight at a time.
     in_flight: AtomicBool,
@@ -62,6 +65,7 @@ impl AppState {
             popup: Mutex::new(PopupState::default()),
             popup_anchor: Mutex::new(None),
             last_input: Mutex::new(None),
+            cache: Mutex::new(TranslationCache::default()),
             in_flight: AtomicBool::new(false),
             overlay_open: AtomicBool::new(false),
             generation: AtomicU64::new(0),

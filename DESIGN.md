@@ -1,6 +1,10 @@
 # Design plan — popup & settings
 
-Written before any markup, per §5 of the implementation plan.
+Written before any markup, and built to afterwards.
+
+This app has exactly two surfaces worth designing deliberately: the **popup**
+(loading / result / error) and the **settings window**. Both are small, and small
+surfaces are where a templated look shows most — there is no content to hide behind.
 
 ## Concept
 

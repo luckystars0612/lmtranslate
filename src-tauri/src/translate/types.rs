@@ -53,6 +53,9 @@ pub struct TranslatedSegment {
 pub struct TranslateResponse {
     pub segments: Vec<TranslatedSegment>,
     pub raw_model_output: String,
+    /// Token counts reported by the endpoint, logged so slow translations can be traced
+    /// to the thing that actually causes them: generated tokens.
+    pub usage: Option<String>,
 }
 
 impl TranslateResponse {

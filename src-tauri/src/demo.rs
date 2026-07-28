@@ -30,6 +30,11 @@ pub fn run(app: AppHandle) {
         let settings = state.settings_snapshot();
         drop(state);
 
+        // Backends first: they are the interesting result on a new machine, and running
+        // them before the ~17s popup cycle makes them easy to time against an external
+        // fixture when reproducing a capture bug.
+        probe_backends(&app).await;
+
         let anchors = corner_anchors(&app);
 
         for (name, anchor) in anchors {
@@ -66,8 +71,6 @@ pub fn run(app: AppHandle) {
         }
 
         popup_window::close(&app);
-
-        probe_backends(&app).await;
         log(&app, "self-test: finished");
     });
 }

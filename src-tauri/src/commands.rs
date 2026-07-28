@@ -82,6 +82,18 @@ pub fn save_settings(
 
     config::save(&state.config_path, &settings)?;
 
+    // Cached results came from the previous provider/model, so they must not be served
+    // as though they came from the new one.
+    if let Ok(mut cache) = state.cache.lock() {
+        let dropped = cache.len();
+        cache.clear();
+        if dropped > 0 {
+            state
+                .logger
+                .info(format!("dropped {dropped} cached translation(s)"));
+        }
+    }
+
     match translate::build_provider(&settings) {
         Ok(provider) => {
             if let Ok(mut slot) = state.provider.write() {

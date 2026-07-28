@@ -392,6 +392,35 @@ async fn run_translation(
         InputKind::ImageBase64(_) => String::new(),
     };
 
+    // A repeat of the same text in the same language costs nothing. Checked before the
+    // provider is even consulted; image input is not cached (see translate::cache).
+    if let InputKind::Text(text) = &input {
+        let cached = app
+            .try_state::<AppState>()
+            .and_then(|state| state.cache.lock().ok()?.get(text, &settings.target_lang));
+
+        if let Some(response) = cached {
+            let translated = response.joined_translated();
+            log_info(
+                &app,
+                &format!("translate cache hit kind=text chars={}", translated.chars().count()),
+            );
+            if let Some(state) = app.try_state::<AppState>() {
+                if let Ok(mut slot) = state.last_input.lock() {
+                    *slot = Some(input.clone());
+                }
+            }
+            settle(
+                &app,
+                generation,
+                PopupState::result(&settings, source_kind, original_display, translated),
+                &settings,
+                true,
+            );
+            return;
+        }
+    }
+
     let provider = {
         let Some(state) = app.try_state::<AppState>() else {
             return;
@@ -429,6 +458,12 @@ async fn run_translation(
         ),
     );
 
+    // Kept for the cache write below, which happens after `input` has been moved.
+    let cache_key = match &input {
+        InputKind::Text(text) => Some(text.clone()),
+        InputKind::ImageBase64(_) => None,
+    };
+
     let request = TranslateRequest {
         input,
         target_lang: settings.target_lang.clone(),
@@ -455,10 +490,11 @@ async fn run_translation(
             log_info(
                 &app,
                 &format!(
-                    "translate ok kind={kind} segments={} chars={} raw={}B in {elapsed_ms}ms",
+                    "translate ok kind={kind} segments={} chars={} raw={}B tokens[{}] in {elapsed_ms}ms",
                     response.segments.len(),
                     translated.chars().count(),
-                    response.raw_model_output.len()
+                    response.raw_model_output.len(),
+                    response.usage.as_deref().unwrap_or("not reported"),
                 ),
             );
 
@@ -478,6 +514,14 @@ async fn run_translation(
                     false,
                 );
                 return;
+            }
+
+            if let Some(text) = cache_key {
+                if let Some(state) = app.try_state::<AppState>() {
+                    if let Ok(mut cache) = state.cache.lock() {
+                        cache.put(&text, &settings.target_lang, &response);
+                    }
+                }
             }
 
             settle(

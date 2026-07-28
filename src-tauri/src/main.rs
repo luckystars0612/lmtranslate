@@ -82,6 +82,10 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let config_path = config::config_path(&handle)?;
     let logger = Logger::new(config::log_path(&handle)?);
 
+    if let Some(from) = config::migrate_legacy_settings(&handle, &config_path) {
+        logger.info(format!("migrated settings from {}", from.display()));
+    }
+
     let settings = match config::load(&config_path) {
         Ok(settings) => settings,
         Err(e) => {
@@ -93,10 +97,14 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // One platform backend, chosen once, from here on hidden behind the trait.
     let platform = platform::detect();
     let capabilities = platform.capabilities();
+    let meta = settings.active_meta();
     logger.info(format!(
-        "LM Translate {} starting — {}",
+        "LM Translate {} starting — {} — provider {} ({:?}), model {}",
         env!("CARGO_PKG_VERSION"),
-        capabilities.backend
+        capabilities.backend,
+        meta.id,
+        meta.api,
+        settings.active_provider_config().model
     ));
     if !capabilities.supports_text_selection {
         logger.warn("select-and-translate is not available on this session");

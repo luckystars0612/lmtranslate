@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img"
+     aria-label="LM Translate">
+  <title>LM Translate</title>
+  <!-- The gloss rail: cool at the top (the language you had), warm at the bottom
+       (the language you wanted). See DESIGN.md. -->
+  <defs>
+    <linearGradient id="rail" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7C9CE8"/>
+      <stop offset="100%" stop-color="#E8A33D"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" rx="224" fill="#171B24"/>
+
+  <rect x="232" y="236" width="40" height="552" rx="20" fill="url(#rail)"/>
+
+  <g fill="#7C9CE8" opacity="0.5">
+    <rect x="328" y="300" width="470" height="52" rx="26"/>
+    <rect x="328" y="376" width="322" height="52" rx="26"/>
+  </g>
+  <g fill="#E8A33D" opacity="0.95">
+    <rect x="328" y="596" width="470" height="52" rx="26"/>
+    <rect x="328" y="672" width="386" height="52" rx="26"/>
+  </g>
+</svg>

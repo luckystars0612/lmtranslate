@@ -1,3 +1,5 @@
+pub mod anthropic;
+pub mod cache;
 pub mod client;
 pub mod prompts;
 pub mod provider;
@@ -5,8 +7,9 @@ pub mod types;
 
 use std::sync::Arc;
 
-use crate::config::{ProviderConfig, ProviderMeta, Settings};
+use crate::config::{ApiShape, ProviderConfig, ProviderMeta, Settings};
 
+use anthropic::AnthropicProvider;
 use client::MiniMaxProvider;
 use provider::TranslateProvider;
 use types::ProviderError;
@@ -21,6 +24,8 @@ pub fn build_from(
     meta: ProviderMeta,
     cfg: ProviderConfig,
 ) -> Result<Arc<dyn TranslateProvider>, ProviderError> {
-    // Both entries in `config::PROVIDERS` speak the OpenAI-compatible chat shape today.
-    Ok(Arc::new(MiniMaxProvider::new(meta, cfg)?))
+    match meta.api {
+        ApiShape::OpenAiChat => Ok(Arc::new(MiniMaxProvider::new(meta, cfg)?)),
+        ApiShape::AnthropicMessages => Ok(Arc::new(AnthropicProvider::new(meta, cfg)?)),
+    }
 }

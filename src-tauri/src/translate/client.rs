@@ -17,6 +17,9 @@ use super::types::{
     InputKind, ProviderError, TranslateRequest, TranslateResponse, TranslatedSegment,
 };
 
+/// Upper bound on generated tokens; the per-request budget is scaled down from here.
+const MAX_TOKENS: u32 = 8192;
+
 pub struct MiniMaxProvider {
     http: reqwest::Client,
     cfg: ProviderConfig,
@@ -108,20 +111,47 @@ impl MiniMaxProvider {
 
     /// One user-turn chat completion. `content` is either a string (text mode) or an
     /// array of content parts (image mode).
-    async fn chat(&self, content: Value) -> Result<String, ProviderError> {
+    async fn chat(
+        &self,
+        content: Value,
+        max_tokens: u32,
+    ) -> Result<(String, Option<String>), ProviderError> {
         self.preflight()?;
 
         let body = json!({
             "model": self.cfg.model,
             "temperature": prompts::TEMPERATURE,
+            // Bounded so a model that starts rambling cannot stall the popup for the
+            // full request timeout.
+            "max_tokens": max_tokens,
             // Honoured where supported; the prompts also demand JSON and the parser
             // has a brace-matching fallback, so it is safe when it is ignored.
             "response_format": { "type": "json_object" },
-            "messages": [{ "role": "user", "content": content }],
+            "messages": [
+                { "role": "system", "content": prompts::SYSTEM_PROMPT },
+                { "role": "user", "content": content },
+            ],
         });
 
         let raw = self.post(body).await?;
         extract_message_content(&raw)
+    }
+}
+
+/// Output budget for a request.
+///
+/// The generated token count is what determines how long the user waits, so it is
+/// scaled to the input rather than left at a flat maximum. Text mode now returns only
+/// the translation, so its output tracks the input length closely; a screenshot can
+/// contain an unknown amount of text and gets the full budget.
+pub(super) fn max_tokens_for(input: &InputKind, ceiling: u32) -> u32 {
+    match input {
+        InputKind::Text(text) => {
+            // ~3 tokens per source character is generous even for scripts that expand.
+            let estimate = text.chars().count().saturating_mul(3).clamp(256, ceiling as usize);
+            estimate as u32
+        }
+        InputKind::ImageBase64(_) => ceiling,
     }
 }
 
@@ -153,10 +183,12 @@ impl TranslateProvider for MiniMaxProvider {
             }
         };
 
-        let raw = self.chat(content).await?;
+        let budget = max_tokens_for(&req.input, MAX_TOKENS);
+        let (text, usage) = self.chat(content, budget).await?;
         Ok(TranslateResponse {
-            segments: parse_segments(&raw, &fallback_original),
-            raw_model_output: raw,
+            segments: parse_segments(&text, &fallback_original),
+            raw_model_output: text,
+            usage,
         })
     }
 
@@ -176,7 +208,7 @@ impl TranslateProvider for MiniMaxProvider {
 
         let raw = self.post(body).await?;
         // A 2xx that carries a provider-level error still means the key was read.
-        check_provider_error(&serde_json::from_str(&raw).unwrap_or(Value::Null))?;
+        check_provider_error(&serde_json::from_str::<Value>(&raw).unwrap_or(Value::Null))?;
 
         Ok(format!(
             "{} answered as {}.",
@@ -186,7 +218,8 @@ impl TranslateProvider for MiniMaxProvider {
     }
 }
 
-fn map_transport_error(e: reqwest::Error) -> ProviderError {
+/// Shared with `super::anthropic`: transport failures look the same either way.
+pub(super) fn map_transport_error(e: reqwest::Error) -> ProviderError {
     if e.is_timeout() {
         ProviderError::Timeout(REQUEST_TIMEOUT_SECS)
     } else {
@@ -194,7 +227,7 @@ fn map_transport_error(e: reqwest::Error) -> ProviderError {
     }
 }
 
-fn truncate(text: &str, max: usize) -> String {
+pub(super) fn truncate(text: &str, max: usize) -> String {
     let trimmed = text.trim();
     if trimmed.chars().count() <= max {
         return trimmed.to_string();
@@ -228,12 +261,15 @@ fn check_provider_error(value: &Value) -> Result<(), ProviderError> {
     })
 }
 
-fn extract_message_content(body: &str) -> Result<String, ProviderError> {
+/// Returns the assistant text and, when the endpoint reports it, a token-usage summary.
+fn extract_message_content(body: &str) -> Result<(String, Option<String>), ProviderError> {
     let value: Value = serde_json::from_str(body).map_err(|e| {
         ProviderError::Unparseable(format!("the endpoint did not return JSON ({e})"))
     })?;
 
     check_provider_error(&value)?;
+
+    let usage = summarise_usage(&value, "prompt_tokens", "completion_tokens");
 
     let message = value
         .get("choices")
@@ -246,16 +282,35 @@ fn extract_message_content(body: &str) -> Result<String, ProviderError> {
             ))
         })?;
 
-    match message.get("content") {
-        Some(Value::String(text)) => Ok(text.clone()),
+    let text = match message.get("content") {
+        Some(Value::String(text)) => text.clone(),
         // Some OpenAI-compatible servers return content as an array of parts.
-        Some(Value::Array(parts)) => Ok(parts
+        Some(Value::Array(parts)) => parts
             .iter()
             .filter_map(|p| p.get("text").and_then(Value::as_str))
             .collect::<Vec<_>>()
-            .join("")),
-        _ => Err(ProviderError::Unparseable(
-            "the reply carried no message content".into(),
+            .join(""),
+        _ => {
+            return Err(ProviderError::Unparseable(
+                "the reply carried no message content".into(),
+            ))
+        }
+    };
+
+    Ok((text, usage))
+}
+
+/// "in=123 out=456" from whichever field names the contract uses.
+pub(super) fn summarise_usage(value: &Value, input_key: &str, output_key: &str) -> Option<String> {
+    let usage = value.get("usage")?;
+    let input = usage.get(input_key).and_then(Value::as_i64);
+    let output = usage.get(output_key).and_then(Value::as_i64);
+    match (input, output) {
+        (None, None) => None,
+        _ => Some(format!(
+            "in={} out={}",
+            input.map(|v| v.to_string()).unwrap_or_else(|| "?".into()),
+            output.map(|v| v.to_string()).unwrap_or_else(|| "?".into()),
         )),
     }
 }
@@ -269,7 +324,20 @@ struct Envelope {
 /// Best-effort read of the model's JSON, degrading to a single raw segment rather
 /// than failing the whole translation.
 pub fn parse_segments(raw: &str, fallback_original: &str) -> Vec<TranslatedSegment> {
-    for candidate in json_candidates(raw) {
+    let cleaned = strip_reasoning(raw);
+    let unfenced = strip_fence(cleaned);
+
+    let mut candidates: Vec<String> = vec![cleaned.to_string()];
+    if unfenced != cleaned {
+        candidates.push(unfenced.to_string());
+    }
+    // A reasoning model puts its answer *after* its deliberation, and the deliberation
+    // often quotes the schema. Prefer the last balanced block for that reason.
+    let mut blocks = json_objects(unfenced);
+    blocks.reverse();
+    candidates.extend(blocks);
+
+    for candidate in candidates {
         if let Ok(envelope) = serde_json::from_str::<Envelope>(&candidate) {
             let segments: Vec<TranslatedSegment> = envelope
                 .segments
@@ -282,24 +350,99 @@ pub fn parse_segments(raw: &str, fallback_original: &str) -> Vec<TranslatedSegme
         }
     }
 
+    // Note this falls back to the *cleaned* text: if the JSON cannot be read at all,
+    // the popup still must never show the model's private reasoning.
     vec![TranslatedSegment {
         original: fallback_original.to_string(),
-        translated: strip_fence(raw).trim().to_string(),
+        translated: unfenced.trim().to_string(),
         ..Default::default()
     }]
 }
 
-fn json_candidates(raw: &str) -> Vec<String> {
-    let mut out = vec![raw.trim().to_string()];
+/// Removes a reasoning model's chain-of-thought preamble.
+///
+/// MiniMax-M3 is a reasoning model. Well-behaved deployments return the deliberation in
+/// a separate `reasoning_content` field, which `extract_message_content` already ignores;
+/// others inline it in `content` wrapped in `<think>` tags. That has to come off before
+/// anything else, because the deliberation discusses the required JSON schema and so is
+/// full of braces — which is enough to defeat any brace-matching scan of the whole reply.
+fn strip_reasoning(raw: &str) -> &str {
+    const CLOSERS: [&str; 3] = ["</think>", "</thinking>", "</reasoning>"];
+    const OPENERS: [&str; 3] = ["<think>", "<thinking>", "<reasoning>"];
 
-    let unfenced = strip_fence(raw);
-    if unfenced != raw.trim() {
-        out.push(unfenced.to_string());
+    let mut out = raw.trim();
+
+    // Everything up to the *last* close tag is deliberation.
+    for closer in CLOSERS {
+        if let Some(index) = out.rfind(closer) {
+            out = out[index + closer.len()..].trim();
+        }
     }
-    if let Some(block) = first_json_object(&unfenced) {
-        out.push(block);
+
+    // An opener with no closer means the reply was cut off mid-thought; there is no
+    // answer in it, and returning the thought would be worse than returning nothing.
+    for opener in OPENERS {
+        if let Some(index) = out.find(opener) {
+            out = out[..index].trim();
+        }
     }
+
     out
+}
+
+/// Every balanced top-level `{...}` block, in order, ignoring braces inside strings.
+fn json_objects(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut blocks = Vec::new();
+    let mut start = 0;
+
+    while start < chars.len() {
+        if chars[start] != '{' {
+            start += 1;
+            continue;
+        }
+
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut end = None;
+
+        for (offset, &c) in chars[start..].iter().enumerate() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            match c {
+                '"' => in_string = true,
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(start + offset);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        match end {
+            Some(index) => {
+                blocks.push(chars[start..=index].iter().collect());
+                start = index + 1;
+            }
+            // Unbalanced from here on, so there is nothing further to find.
+            None => break,
+        }
+    }
+
+    blocks
 }
 
 fn strip_fence(raw: &str) -> &str {
@@ -313,41 +456,6 @@ fn strip_fence(raw: &str) -> &str {
         .strip_suffix("```")
         .unwrap_or(rest)
         .trim()
-}
-
-/// First balanced `{...}` block, ignoring braces inside JSON strings.
-fn first_json_object(text: &str) -> Option<String> {
-    let bytes: Vec<char> = text.chars().collect();
-    let start = bytes.iter().position(|&c| c == '{')?;
-
-    let mut depth = 0usize;
-    let mut in_string = false;
-    let mut escaped = false;
-
-    for (offset, &c) in bytes[start..].iter().enumerate() {
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if c == '\\' {
-                escaped = true;
-            } else if c == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        match c {
-            '"' => in_string = true,
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(bytes[start..=start + offset].iter().collect());
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 #[cfg(test)]
@@ -397,6 +505,63 @@ mod tests {
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].original, "Hello");
         assert_eq!(segments[0].translated, "Xin chào");
+    }
+
+    #[test]
+    fn strips_a_reasoning_block() {
+        let raw = "<think>The user wants Vietnamese. Let me translate.</think>\n\
+                   {\"segments\":[{\"original\":\"Hi\",\"translated\":\"Chào\"}]}";
+        let segments = parse_segments(raw, "Hi");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].translated, "Chào");
+    }
+
+    /// The regression that put chain-of-thought in the popup: the deliberation quotes
+    /// the schema, so a brace scan over the whole reply starts inside the reasoning and
+    /// never balances.
+    #[test]
+    fn strips_reasoning_that_quotes_the_schema() {
+        let raw = "<think>\nI should return it as a single segment.\n\
+                   Format: {\"segments\": [{\"original\"\n</think>\n\
+                   {\"segments\":[{\"original\":\"Monitor and block\",\"translated\":\"Giám sát và chặn\"}]}";
+        let segments = parse_segments(raw, "Monitor and block");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].translated, "Giám sát và chặn");
+        assert!(!segments[0].translated.contains("think"));
+    }
+
+    #[test]
+    fn prefers_the_answer_over_a_decoy_earlier_in_the_reply() {
+        let raw = "Example of the shape: {\"segments\":[{\"original\":\"x\",\"translated\":\"DECOY\"}]}\n\
+                   Here is the real answer:\n\
+                   {\"segments\":[{\"original\":\"Hi\",\"translated\":\"Chào\"}]}";
+        let segments = parse_segments(raw, "Hi");
+        assert_eq!(segments[0].translated, "Chào");
+    }
+
+    #[test]
+    fn a_fenced_reply_after_reasoning_still_parses() {
+        let raw = "<think>thinking {braces} here</think>\n```json\n\
+                   {\"segments\":[{\"original\":\"Hi\",\"translated\":\"Chào\"}]}\n```";
+        let segments = parse_segments(raw, "Hi");
+        assert_eq!(segments[0].translated, "Chào");
+    }
+
+    /// Truncated mid-thought: there is no answer, and leaking the thought would be
+    /// worse than reporting nothing. An empty translation becomes an error state.
+    #[test]
+    fn unclosed_reasoning_never_leaks() {
+        let raw = "<think>Let me work out how to phrase this";
+        let segments = parse_segments(raw, "Hi");
+        assert_eq!(segments.len(), 1);
+        assert!(segments[0].translated.is_empty());
+    }
+
+    #[test]
+    fn the_raw_fallback_is_never_the_reasoning() {
+        let raw = "<think>deliberating</think>Chào buổi sáng";
+        let segments = parse_segments(raw, "Good morning");
+        assert_eq!(segments[0].translated, "Chào buổi sáng");
     }
 
     #[test]

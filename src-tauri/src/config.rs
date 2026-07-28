@@ -35,6 +35,17 @@ pub const COMMON_LANGUAGES: &[&str] = &[
     "Indonesian",
 ];
 
+/// Which HTTP contract a provider speaks. These are genuinely different request and
+/// response shapes, not variants — see `translate::client` and `translate::anthropic`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ApiShape {
+    /// `POST {base}/chat/completions`, reasoning inlined in the message content.
+    OpenAiChat,
+    /// `POST {base}/v1/messages`, reasoning carried in its own content block.
+    AnthropicMessages,
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderMeta {
@@ -43,17 +54,33 @@ pub struct ProviderMeta {
     pub default_base_url: &'static str,
     pub default_model: &'static str,
     pub supports_image: bool,
+    pub api: ApiShape,
 }
 
-/// v1 ships one real implementation, but the list is the thing the UI binds to, so
-/// adding a provider is a matter of adding a row plus a `TranslateProvider` impl.
+/// The list is what the UI binds to, so adding a provider is a row here plus a
+/// `TranslateProvider` impl.
+///
+/// The Anthropic-shaped MiniMax endpoint is first, and so the default for a fresh
+/// install, because it keeps the model's chain-of-thought in a separate content block
+/// instead of inlining it in the answer — see `translate::anthropic` for why that
+/// matters. The OpenAI-shaped entries remain because that contract is what every
+/// self-hosted and proxy server speaks.
 pub const PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta {
+        id: "minimax-anthropic",
+        label: "MiniMax (Anthropic API)",
+        default_base_url: "https://api.minimax.io/anthropic",
+        default_model: "MiniMax-M3",
+        supports_image: true,
+        api: ApiShape::AnthropicMessages,
+    },
+    ProviderMeta {
         id: "minimax",
-        label: "MiniMax",
+        label: "MiniMax (OpenAI-compatible API)",
         default_base_url: "https://api.minimax.io/v1",
         default_model: "MiniMax-M3",
         supports_image: true,
+        api: ApiShape::OpenAiChat,
     },
     ProviderMeta {
         id: "openai-compatible",
@@ -61,6 +88,15 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         default_base_url: "http://localhost:8000/v1",
         default_model: "",
         supports_image: true,
+        api: ApiShape::OpenAiChat,
+    },
+    ProviderMeta {
+        id: "anthropic-compatible",
+        label: "Anthropic-compatible endpoint",
+        default_base_url: "https://api.anthropic.com",
+        default_model: "",
+        supports_image: true,
+        api: ApiShape::AnthropicMessages,
     },
 ];
 
@@ -177,18 +213,55 @@ impl Settings {
     }
 }
 
-pub fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
+/// The one folder this app writes to, named after the app and nothing else.
+///
+/// Deliberately not derived from the bundle identifier: `app_config_dir()` and
+/// `app_log_dir()` append the whole reverse-DNS identifier, which puts vendor branding
+/// into paths the user has to look at.
+pub const APP_DIR: &str = "LMTranslate";
+
+/// Folder names written by earlier builds, checked once so an upgrade does not lose a
+/// saved API key. Safe to delete an entry here once nobody is upgrading from it.
+const LEGACY_DIRS: &[&str] = &["vn.vinsoc.lmtranslate", "com.lmtranslate.desktop"];
+
+fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
-        .app_config_dir()
-        .map(|dir| dir.join("settings.json"))
+        .config_dir()
+        .map(|dir| dir.join(APP_DIR))
         .map_err(|e| format!("could not locate the config directory: {e}"))
 }
 
+pub fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_dir(app)?.join("settings.json"))
+}
+
 pub fn log_path(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_log_dir()
-        .map(|dir| dir.join("lmtranslate.log"))
-        .map_err(|e| format!("could not locate the log directory: {e}"))
+    Ok(app_dir(app)?.join("logs").join("lmtranslate.log"))
+}
+
+/// Copies settings forward from a folder an older build used, if the new one has none.
+/// Returns the path it migrated from, for the log.
+pub fn migrate_legacy_settings(app: &AppHandle, target: &Path) -> Option<PathBuf> {
+    if target.exists() {
+        return None;
+    }
+    let base = app.path().config_dir().ok()?;
+
+    for legacy in LEGACY_DIRS {
+        let candidate = base.join(legacy).join("settings.json");
+        if !candidate.exists() {
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            if std::fs::create_dir_all(parent).is_err() {
+                return None;
+            }
+        }
+        if std::fs::copy(&candidate, target).is_ok() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 pub fn load(path: &Path) -> Result<Settings, String> {

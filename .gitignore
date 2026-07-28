@@ -4,3 +4,6 @@ src-tauri/target/
 src-tauri/gen/schemas/
 *.local
 .DS_Store
+
+# Kept on disk, deliberately never published.
+translate-app-implementation-plan.md
