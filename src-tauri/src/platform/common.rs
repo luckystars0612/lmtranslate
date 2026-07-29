@@ -1,5 +1,5 @@
 //! Bits shared by the backends that behave alike: the simulate-copy dance used by
-//! Windows, macOS and X11, and the `xcap` capture used by everything except Wayland.
+//! Windows, macOS and X11, and the `xcap` capture used by Windows and macOS.
 
 use std::time::{Duration, Instant};
 
@@ -170,7 +170,11 @@ pub fn put_on_clipboard(text: String) -> Result<(), String> {
     }
 }
 
-/// Direct capture through `xcap` — correct on Windows, macOS and X11.
+/// Direct capture through `xcap`.
+///
+/// Windows and macOS only: see the Cargo.toml note on why Linux does not use xcap.
+/// `linux_x11.rs` and `linux_wayland.rs` provide the equivalent for their sessions.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub fn capture_region_xcap(
     x: i32,
     y: i32,

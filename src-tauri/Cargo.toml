@@ -27,7 +27,6 @@ tauri-plugin-global-shortcut = "2.3.2"
 tauri-plugin-opener = "2.5.4"
 thiserror = "2.0.19"
 tokio = { version = "1.53.1", features = ["time", "sync", "rt-multi-thread", "macros"] }
-xcap = { version = "0.9.7", features = ["image"] }
 
 [profile.release]
 codegen-units = 1
@@ -36,12 +35,24 @@ opt-level = "s"
 panic = "abort"
 strip = true
 
+# Screen capture on Windows and macOS only.
+#
+# Not on Linux: xcap depends unconditionally on `pipewire`, whose -sys crate binds against
+# the system SPA headers. That pins the build to a very recent PipeWire (it fails to
+# compile against the 0.3.48 headers on Ubuntu 22.04) and drags in a wlroots screencopy
+# stack this app never uses, because the Wayland backend goes through xdg-desktop-portal.
+# Linux captures with x11rb (X11) and ashpd (Wayland) instead — both pure Rust.
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+xcap = { version = "0.9.7", features = ["image"] }
+
 # Linux only. Wayland sandboxes input injection and screen capture, so both flows need
 # genuinely different backends there: ashpd (xdg-desktop-portal) for capture, and the
 # primary-selection protocol via wl-clipboard-rs for text. x11-clipboard gives X11 the
-# PRIMARY fast path that skips the simulate-copy step entirely.
+# PRIMARY fast path that skips the simulate-copy step entirely, and x11rb provides the
+# GetImage call that is all X11 region capture actually needs.
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = "0.12.3"
 wl-clipboard-rs = "0.9.3"
 x11-clipboard = "0.9.3"
+x11rb = "0.13.2"
 arboard = { version = "3.6.1", features = ["wl-clipboard-rs"] }

@@ -61,12 +61,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
+          # No pipewire/spa/xcb headers needed: the Linux capture backends are x11rb and
+          # ashpd, both pure Rust. Ubuntu 22.04 ships PipeWire 0.3.48, whose SPA headers
+          # are too old for the libspa crate, which is why xcap is not used here.
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
-            libxdo-dev libssl-dev build-essential pkg-config rpm \
-            libpipewire-0.3-dev libspa-0.2-dev \
-            libxcb1-dev libxcb-render0-dev libxext-dev \
-            libwayland-dev libdbus-1-dev libxkbcommon-dev
+            libxdo-dev libssl-dev build-essential pkg-config rpm
 
       - run: npm ci
 

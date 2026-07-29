@@ -172,7 +172,7 @@ install scripts check for all of it and offer to fix what is missing.
 | **All platforms** | [Rust](https://rustup.rs) 1.85+, [Node](https://nodejs.org) 20+ |
 | **Windows** | Visual Studio Build Tools with the C++ workload; WebView2 runtime (preinstalled on Windows 11 and current Windows 10) |
 | **macOS** | Xcode command line tools |
-| **Linux** | `webkit2gtk-4.1`, `libayatana-appindicator3`, `librsvg2`, `libxdo`, `libssl-dev`, plus `xdg-desktop-portal` on Wayland |
+| **Linux** | `webkit2gtk-4.1`, `libayatana-appindicator3`, `librsvg2`, `libxdo`, `libssl-dev`, plus `xdg-desktop-portal` on Wayland. No PipeWire or XCB headers: both capture backends are pure Rust. |
 
 On Debian/Ubuntu:
 
@@ -312,7 +312,7 @@ shows which backend is active and what it can do on the current session.
 |---|---|---|
 | **Windows** | synthetic `Ctrl+C`, clipboard saved and restored | Desktop Duplication |
 | **macOS** | synthetic `Cmd+C`, clipboard saved and restored | CoreGraphics |
-| **Linux / X11** | **PRIMARY selection** — nothing simulated, clipboard untouched | XCB |
+| **Linux / X11** | **PRIMARY selection** — nothing simulated, clipboard untouched | `GetImage` on the root window |
 | **Linux / Wayland** | **primary-selection protocol** — no synthetic input is possible | `xdg-desktop-portal` |
 
 A detail worth knowing: a global hotkey fires on key-*down*, so `Alt` is still held when
@@ -398,9 +398,10 @@ Stated plainly rather than discovered later:
 - **The Wayland backends are the least exercised code here.** They compile only on Linux
   and have not been run against GNOME or KDE.
 - **No streaming**, so the popup shows a loading state until the whole reply arrives.
-- **The release workflow has never run.** Its YAML parses and the build steps mirror what
-  works locally, but no CI execution has happened yet, so the first tag push is also the
-  first real test of the macOS and Linux builds.
+- **The Linux build has never been compiled end to end.** Its X11 `GetImage` decode is
+  verified against a real X server (colours round-trip byte-exact), and the dependency
+  graph is confirmed free of PipeWire, but no machine here can link the full Linux binary.
+- **The macOS build has never been compiled**, only dependency-resolved.
 - **The installers are verified on Windows and on Linux/apt** in dry-run, including the
   no-release-published path and the releases-API parsing. Their macOS branch and the
   `rpm`/AppImage install paths have not been executed.
