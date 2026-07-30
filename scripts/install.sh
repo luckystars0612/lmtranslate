@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-REPO="${LMTRANSLATE_REPO:-luckystars0612/lmtranstrale}"
+REPO="${LMTRANSLATE_REPO:-luckystars0612/lmtranslate}"
 API="https://api.github.com/repos/$REPO/releases"
 
 NODE_MIN=20.0

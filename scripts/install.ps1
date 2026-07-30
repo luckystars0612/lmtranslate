@@ -30,7 +30,7 @@ $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $Repo = $env:LMTRANSLATE_REPO
-if (-not $Repo) { $Repo = 'luckystars0612/lmtranstrale' }
+if (-not $Repo) { $Repo = 'luckystars0612/lmtranslate' }
 $Api = "https://api.github.com/repos/$Repo/releases"
 
 $NodeMin = [Version]'20.0'
