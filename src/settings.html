@@ -133,6 +133,21 @@
         </div>
 
         <div class="row">
+          <label for="rewriteShowPopup">Rewriting</label>
+          <div class="field-stack">
+            <label class="check">
+              <input id="rewriteShowPopup" type="checkbox" />
+              <span>Show the translation in a popup after rewriting</span>
+            </label>
+            <p class="note">
+              Turn this off to let the rewrite hotkey work silently — the selection is
+              replaced and nothing appears on screen. Problems still open the popup, so a
+              rewrite that could not be applied never fails silently.
+            </p>
+          </div>
+        </div>
+
+        <div class="row">
           <label for="theme">Theme</label>
           <select id="theme">
             <option value="system">Match system</option>

@@ -73,8 +73,15 @@ async fn text_flow(app: AppHandle, generation: u64, settings: Settings, mode: Te
         .await;
     }
 
+    // A rewrite the user asked to be silent shows nothing up front — but the anchor is
+    // still recorded, so if it fails the popup can appear next to the cursor.
+    let quiet = mode == TextMode::Replace && !settings.rewrite_show_popup;
     let anchor = popup_window::cursor_anchor(&app);
-    popup_window::show(&app, anchor, PopupState::loading(&settings, "text"));
+    if quiet {
+        popup_window::set_anchor(&app, anchor);
+    } else {
+        popup_window::show(&app, anchor, PopupState::loading(&settings, "text"));
+    }
 
     let grab = {
         let app = app.clone();
@@ -94,7 +101,7 @@ async fn text_flow(app: AppHandle, generation: u64, settings: Settings, mode: Te
             if fixable {
                 popup = popup.offering_settings();
             }
-            settle(&app, generation, popup, &settings, false);
+            settle(&app, generation, popup, &settings, false, quiet);
             return;
         }
         Err(join_error) => {
@@ -111,6 +118,7 @@ async fn text_flow(app: AppHandle, generation: u64, settings: Settings, mode: Te
                 ),
                 &settings,
                 false,
+                quiet,
             );
             return;
         }
@@ -124,10 +132,12 @@ async fn text_flow(app: AppHandle, generation: u64, settings: Settings, mode: Te
         popup_window::focus(&app);
     }
 
-    popup_window::update(
-        &app,
-        PopupState::loading_with_original(&settings, "text", text.clone()),
-    );
+    if !quiet {
+        popup_window::update(
+            &app,
+            PopupState::loading_with_original(&settings, "text", text.clone()),
+        );
+    }
 
     run_translation(
         app,
@@ -412,6 +422,8 @@ async fn run_translation(
     settings: Settings,
     replace: bool,
 ) {
+    // A rewrite that already edited the document has nothing to report on success.
+    let quiet = replace && !settings.rewrite_show_popup;
     let started = Instant::now();
     let kind = input.label();
     let magnitude = input.magnitude();
@@ -441,15 +453,14 @@ async fn run_translation(
             }
             // A cache hit still has to paste, or Alt+F would silently do nothing the
             // second time you pressed it on the same text.
-            let note = paste_over_selection(&app, replace, &translated).await;
-            settle(
-                &app,
-                generation,
+            let replacement = paste_over_selection(&app, replace, &translated).await;
+            let mut popup =
                 PopupState::result(&settings, source_kind, original_display, translated)
-                    .with_note(note),
-                &settings,
-                true,
-            );
+                    .with_note(replacement.note);
+            if replacement.failed {
+                popup = popup.marking_replace_failed();
+            }
+            settle(&app, generation, popup, &settings, true, quiet);
             return;
         }
     }
@@ -478,6 +489,7 @@ async fn run_translation(
             .offering_settings(),
             &settings,
             false,
+            quiet,
         );
         return;
     };
@@ -545,6 +557,7 @@ async fn run_translation(
                     .offering_settings(),
                     &settings,
                     false,
+                    quiet,
                 );
                 return;
             }
@@ -557,16 +570,14 @@ async fn run_translation(
                 }
             }
 
-            let note = paste_over_selection(&app, replace, &translated).await;
+            let replacement = paste_over_selection(&app, replace, &translated).await;
+            let mut popup = PopupState::result(&settings, source_kind, original, translated)
+                .with_note(replacement.note);
+            if replacement.failed {
+                popup = popup.marking_replace_failed();
+            }
 
-            settle(
-                &app,
-                generation,
-                PopupState::result(&settings, source_kind, original, translated)
-                    .with_note(note),
-                &settings,
-                true,
-            );
+            settle(&app, generation, popup, &settings, true, quiet);
         }
         Err(error) => {
             log_warn(
@@ -582,19 +593,30 @@ async fn run_translation(
                     .offering_settings(),
                 &settings,
                 false,
+                quiet,
             );
         }
     }
 }
 
-/// Pastes the translation over the selection, returning a short status for the popup's
-/// footer. Returns an empty string when this was not a rewrite.
+/// Outcome of a rewrite's paste-back step.
+struct Replacement {
+    /// Short status for the popup's footer; empty when this was not a rewrite.
+    note: String,
+    /// Whether the paste failed, which forces even a quiet rewrite to show the popup.
+    failed: bool,
+}
+
+/// Pastes the translation over the selection, reporting what happened.
 ///
 /// Failure is never fatal: the popup keeps the translation and its Copy button, so a
 /// read-only target or a Wayland session costs the user a keystroke, not the result.
-async fn paste_over_selection(app: &AppHandle, replace: bool, translated: &str) -> String {
+async fn paste_over_selection(app: &AppHandle, replace: bool, translated: &str) -> Replacement {
     if !replace || translated.trim().is_empty() {
-        return String::new();
+        return Replacement {
+            note: String::new(),
+            failed: false,
+        };
     }
 
     let handle = app.clone();
@@ -608,33 +630,61 @@ async fn paste_over_selection(app: &AppHandle, replace: bool, translated: &str) 
     match outcome {
         Ok(Ok(())) => {
             log_info(app, "replaced the selection in place");
-            "REPLACED THE SELECTION".into()
+            Replacement {
+                note: "REPLACED THE SELECTION".into(),
+                failed: false,
+            }
         }
         Ok(Err(error)) => {
             log_warn(app, &format!("could not replace the selection: {error}"));
-            "COULD NOT REPLACE — USE COPY".into()
+            Replacement {
+                note: "COULD NOT REPLACE — USE COPY".into(),
+                failed: true,
+            }
         }
         Err(join_error) => {
             log_error(app, &format!("paste task panicked: {join_error}"));
-            "COULD NOT REPLACE — USE COPY".into()
+            Replacement {
+                note: "COULD NOT REPLACE — USE COPY".into(),
+                failed: true,
+            }
         }
     }
 }
 
 /// Puts the final state on screen (unless the popup has moved on) and releases the
 /// in-flight guard.
+///
+/// `quiet` is set for a rewrite that the user asked to happen without a popup. It is the
+/// single place that decision is made, so no ending can forget it.
 fn settle(
     app: &AppHandle,
     generation: u64,
     state_out: PopupState,
     settings: &Settings,
     schedule_close: bool,
+    quiet: bool,
 ) {
     if let Some(state) = app.try_state::<AppState>() {
         if state.is_current(generation) {
-            popup_window::update(app, state_out);
-            if schedule_close {
-                schedule_auto_close(app, generation, settings.popup_auto_close_ms);
+            if !quiet {
+                popup_window::update(app, state_out);
+                if schedule_close {
+                    schedule_auto_close(app, generation, settings.popup_auto_close_ms);
+                }
+            } else if state_out.needs_attention() {
+                // Something went wrong, so the popup has to appear after all. `show`
+                // rather than `update`: running quietly, no window was ever created.
+                match popup_window::stored_anchor(app) {
+                    Some(anchor) => {
+                        popup_window::show(app, anchor, state_out);
+                        popup_window::focus(app);
+                    }
+                    None => popup_window::update(app, state_out),
+                }
+            } else {
+                // The rewrite already did the work; there is nothing to interrupt for.
+                popup_window::close(app);
             }
         }
         state.end_flight();

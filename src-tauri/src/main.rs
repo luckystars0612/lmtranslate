@@ -106,8 +106,21 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         meta.api,
         settings.active_provider_config().model
     ));
+    logger.info(format!(
+        "languages: target={}, rewrite={} (rewrite popup {})",
+        settings.target_lang,
+        settings.replace_lang,
+        if settings.rewrite_show_popup {
+            "shown"
+        } else {
+            "hidden"
+        }
+    ));
     if !capabilities.supports_text_selection {
         logger.warn("select-and-translate is not available on this session");
+    }
+    if !capabilities.supports_replace {
+        logger.warn("rewrite-in-place is not available on this session");
     }
 
     let provider = translate::build_provider(&settings)

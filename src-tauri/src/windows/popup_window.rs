@@ -53,6 +53,10 @@ pub struct PopupState {
     pub can_retranslate: bool,
     /// Short status shown in the footer, e.g. whether a rewrite replaced the selection.
     pub note: String,
+    /// Set when a rewrite could not paste. Never sent to the webview — it exists so a
+    /// quiet rewrite knows it has to surface the popup after all.
+    #[serde(skip)]
+    pub replace_failed: bool,
     /// True for errors the user can actually act on, which puts an "Open Settings"
     /// button on the popup instead of leaving them to find it in the tray.
     pub offer_settings: bool,
@@ -73,6 +77,7 @@ impl Default for PopupState {
             error_hint: String::new(),
             can_retranslate: false,
             note: String::new(),
+            replace_failed: false,
             offer_settings: false,
             theme: "system".into(),
             languages: COMMON_LANGUAGES.iter().map(|s| s.to_string()).collect(),
@@ -153,6 +158,17 @@ impl PopupState {
     pub fn with_note(mut self, note: impl Into<String>) -> Self {
         self.note = note.into();
         self
+    }
+
+    pub fn marking_replace_failed(mut self) -> Self {
+        self.replace_failed = true;
+        self
+    }
+
+    /// True for states the user has to be shown even when the rewrite is running quietly:
+    /// anything that went wrong. A silent failure is indistinguishable from a dead hotkey.
+    pub fn needs_attention(&self) -> bool {
+        self.kind == "error" || self.replace_failed
     }
 }
 
@@ -237,6 +253,21 @@ pub fn resize_to(app: &AppHandle, height: f64) {
             let _ = reposition(&app, &window);
         }
     });
+}
+
+/// Remembers where the popup belongs without opening it. A quiet rewrite needs this so
+/// that if it later has to report a failure, the popup still lands next to the cursor.
+pub fn set_anchor(app: &AppHandle, anchor: Anchor) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut slot) = state.popup_anchor.lock() {
+            *slot = Some(anchor);
+        }
+    }
+}
+
+pub fn stored_anchor(app: &AppHandle) -> Option<Anchor> {
+    app.try_state::<AppState>()
+        .and_then(|state| state.popup_anchor.lock().ok().and_then(|slot| *slot))
 }
 
 pub fn snapshot(app: &AppHandle) -> PopupState {
@@ -372,6 +403,49 @@ fn reposition(app: &AppHandle, window: &WebviewWindow) -> tauri::Result<()> {
         x.clamp(min_x, max_x).round() as i32,
         y.clamp(min_y, max_y).round() as i32,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Settings;
+
+    /// `needs_attention` is what decides whether a rewrite the user asked to be silent
+    /// stays silent, so each state's answer is pinned here rather than left to inspection.
+    #[test]
+    fn only_problems_interrupt_a_quiet_rewrite() {
+        let settings = Settings::default();
+
+        let loading = PopupState::loading(&settings, "text");
+        assert!(!loading.needs_attention(), "loading must stay hidden");
+
+        let ok = PopupState::result(&settings, "text", "xin chào".into(), "hello".into())
+            .with_note("REPLACED THE SELECTION");
+        assert!(!ok.needs_attention(), "a successful rewrite must stay hidden");
+
+        let paste_failed =
+            PopupState::result(&settings, "text", "xin chào".into(), "hello".into())
+                .with_note("COULD NOT REPLACE — USE COPY")
+                .marking_replace_failed();
+        assert!(
+            paste_failed.needs_attention(),
+            "a rewrite that could not paste must surface, or it looks like a dead hotkey"
+        );
+
+        let failed = PopupState::error(&settings, "text", "Invalid API key", "detail", "hint");
+        assert!(failed.needs_attention(), "errors must always surface");
+    }
+
+    /// The flag is an internal signal, not something the webview should receive.
+    #[test]
+    fn the_replace_failed_flag_is_not_serialised() {
+        let settings = Settings::default();
+        let state = PopupState::result(&settings, "text", String::new(), "hi".into())
+            .marking_replace_failed();
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(!json.contains("replaceFailed"));
+        assert!(!json.contains("replace_failed"));
+    }
 }
 
 /// Where the popup should appear for Flow 1: at the mouse cursor.

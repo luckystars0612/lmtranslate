@@ -23,6 +23,7 @@ interface Settings {
   hotkeyReplace: string;
   hotkeyScreenshot: string;
   launchOnLogin: boolean;
+  rewriteShowPopup: boolean;
   popupAutoCloseMs: number;
   theme: "system" | "light" | "dark";
 }
@@ -61,6 +62,7 @@ const hkText = el<HTMLButtonElement>("hkText");
 const hkReplace = el<HTMLButtonElement>("hkReplace");
 const hkShot = el<HTMLButtonElement>("hkShot");
 const autoClose = el<HTMLSelectElement>("autoClose");
+const rewriteShowPopup = el<HTMLInputElement>("rewriteShowPopup");
 const themeSel = el<HTMLSelectElement>("theme");
 const launchOnLogin = el<HTMLInputElement>("launchOnLogin");
 const platform = el<HTMLParagraphElement>("platform");
@@ -117,6 +119,7 @@ function renderForm() {
   hkReplace.textContent = settings.hotkeyReplace || "Click to set";
   hkShot.textContent = settings.hotkeyScreenshot || "Click to set";
   autoClose.value = String(settings.popupAutoCloseMs);
+  rewriteShowPopup.checked = settings.rewriteShowPopup;
   themeSel.value = settings.theme;
   launchOnLogin.checked = settings.launchOnLogin;
   applyTheme(settings.theme);
@@ -133,6 +136,7 @@ async function save() {
   settings.targetLang = targetLang.value.trim() || settings.targetLang;
   settings.replaceLang = replaceLang.value.trim() || settings.replaceLang;
   settings.popupAutoCloseMs = Number(autoClose.value);
+  settings.rewriteShowPopup = rewriteShowPopup.checked;
   settings.theme = themeSel.value as Settings["theme"];
   settings.launchOnLogin = launchOnLogin.checked;
   applyTheme(settings.theme);
@@ -275,7 +279,7 @@ providerSel.addEventListener("change", async () => {
 for (const node of [baseUrl, model, apiKey, targetLang, replaceLang]) {
   node.addEventListener("change", () => void save());
 }
-for (const node of [autoClose, themeSel, launchOnLogin]) {
+for (const node of [autoClose, rewriteShowPopup, themeSel, launchOnLogin]) {
   node.addEventListener("change", () => void save());
 }
 

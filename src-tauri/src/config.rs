@@ -133,6 +133,10 @@ pub struct Settings {
     pub hotkey_replace: String,
     pub hotkey_screenshot: String,
     pub launch_on_login: bool,
+    /// When false, a successful rewrite happens silently — no popup at all. Failures
+    /// still surface one, because a silent no-op would be indistinguishable from a
+    /// broken hotkey.
+    pub rewrite_show_popup: bool,
     /// 0 means "stay until dismissed".
     pub popup_auto_close_ms: u64,
     pub theme: String,
@@ -163,6 +167,7 @@ impl Default for Settings {
             hotkey_replace: DEFAULT_HOTKEY_REPLACE.to_string(),
             hotkey_screenshot: DEFAULT_HOTKEY_SCREENSHOT.to_string(),
             launch_on_login: false,
+            rewrite_show_popup: true,
             popup_auto_close_ms: 0,
             theme: "system".to_string(),
         }
@@ -291,6 +296,41 @@ pub fn load(path: &Path) -> Result<Settings, String> {
     let parsed: Settings =
         serde_json::from_str(raw).map_err(|e| format!("{path:?} is not valid settings: {e}"))?;
     Ok(parsed.normalized())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Container-level `#[serde(default)]` fills missing fields from `Settings::default()`,
+    /// not from each field type's own `Default`. That distinction matters: a settings file
+    /// written before `rewriteShowPopup` existed must keep showing the popup rather than
+    /// silently switching rewrites to quiet mode, which `bool::default()` would do.
+    #[test]
+    fn missing_fields_come_from_the_struct_default() {
+        let parsed: Settings = serde_json::from_str(r#"{"targetLang":"Japanese"}"#).unwrap();
+        assert_eq!(parsed.target_lang, "Japanese");
+        assert!(
+            parsed.rewrite_show_popup,
+            "an older settings file must keep showing the rewrite popup"
+        );
+        assert_eq!(parsed.hotkey_replace, DEFAULT_HOTKEY_REPLACE);
+        assert_eq!(parsed.replace_lang, DEFAULT_REPLACE_LANG);
+    }
+
+    #[test]
+    fn an_explicit_false_is_preserved() {
+        let parsed: Settings =
+            serde_json::from_str(r#"{"rewriteShowPopup":false}"#).unwrap();
+        assert!(!parsed.rewrite_show_popup);
+    }
+
+    /// Blank strings are backfilled, but a deliberate `false` must survive normalisation.
+    #[test]
+    fn normalising_does_not_resurrect_the_popup() {
+        let parsed: Settings = serde_json::from_str(r#"{"rewriteShowPopup":false}"#).unwrap();
+        assert!(!parsed.normalized().rewrite_show_popup);
+    }
 }
 
 pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {

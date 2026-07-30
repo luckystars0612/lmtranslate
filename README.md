@@ -43,9 +43,13 @@ selection is replaced by natural English (or whatever you set **Rewrite into** t
 
 - Your clipboard is **saved and restored** around the paste, so the only lasting change
   is in your document.
-- The popup still shows the translation with a **Copy translation** button, so nothing is
-  lost if the target application ignores the paste — a read-only view, for instance. The
-  footer says whether the replacement actually landed.
+- By default the popup still shows the translation with a **Copy translation** button, and
+  its footer says whether the replacement landed. Turn off **Behaviour → Rewriting → Show
+  the translation in a popup after rewriting** and the hotkey works silently: the text is
+  replaced and nothing appears on screen.
+- Silent mode still opens the popup when something **goes wrong** — nothing selected, the
+  request failed, or the paste was refused. A rewrite that cannot be applied is otherwise
+  indistinguishable from a dead hotkey.
 - It needs to paste, so it does **not** work on Wayland, which forbids one application
   from injecting input into another. There the popup reports that and you can copy
   manually. Settings → Advanced always states whether this session supports it.
@@ -225,8 +229,9 @@ Open **Settings** from the tray icon and fill in the Provider section:
   fail inline instead of saving silently.
 
 **Target language** (what `Alt+D` translates into), **Rewrite into** (what `Alt+F`
-replaces your selection with, default English), all three hotkeys, launch-on-login, popup
-auto-close and theme are optional and persist across restarts.
+replaces your selection with, default English), all three hotkeys, whether a rewrite shows
+a popup at all, launch-on-login, popup auto-close and theme are optional and persist
+across restarts.
 
 ### Where your files live
 
