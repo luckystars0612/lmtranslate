@@ -72,6 +72,13 @@ jobs:
 
       - run: cd src-tauri && cargo test --locked
 
+      # The collect step globs every bundle under target/, and the Rust cache restores
+      # target/ from a previous run — so without this a stale bundle from an older
+      # version could be published alongside the current one.
+      - name: Discard any cached bundles
+        shell: bash
+        run: find src-tauri/target -type d -name bundle -prune -exec rm -rf {} + 2>/dev/null || true
+
       - name: Build
         run: npx tauri build ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --bundles ${{ matrix.bundles }}
 

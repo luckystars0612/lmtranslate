@@ -415,6 +415,10 @@ Running the workflow manually from the Actions tab builds everything without pub
 which is the cheap way to check a platform you cannot build locally. macOS is built as a
 universal binary, and Linux on Ubuntu 22.04 so the result installs on newer distros too.
 
+Bump the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`
+before tagging. Those manifests — not the tag — decide the filenames of the built
+artifacts, so a tag that disagrees with them publishes mislabelled files.
+
 ### Known limitations
 
 Stated plainly rather than discovered later:
@@ -423,13 +427,14 @@ Stated plainly rather than discovered later:
   are implemented and unit-tested against recorded response shapes, but no request has
   been made to a real endpoint. The Anthropic path's URL layout and auth headers are
   inferred from that contract.
-- **The Wayland backends are the least exercised code here.** They compile only on Linux
-  and have not been run against GNOME or KDE.
+- **Only the Windows build has been run.** CI compiles all three platforms and `cargo test`
+  passes on each, so the macOS and Linux binaries do build and link — but nobody has
+  launched them. The hotkeys, both capture backends and the paste-back are verified on
+  Windows only.
+- **The Wayland backends are the least exercised code here** — the portal capture and the
+  primary-selection read have never run against GNOME or KDE. The X11 `GetImage` decode is
+  separately verified against a real X server, with colours round-tripping byte-exact.
 - **No streaming**, so the popup shows a loading state until the whole reply arrives.
-- **The Linux build has never been compiled end to end.** Its X11 `GetImage` decode is
-  verified against a real X server (colours round-trip byte-exact), and the dependency
-  graph is confirmed free of PipeWire, but no machine here can link the full Linux binary.
-- **The macOS build has never been compiled**, only dependency-resolved.
 - **The installers are verified on Windows and on Linux/apt** in dry-run, including the
   no-release-published path and the releases-API parsing. Their macOS branch and the
   `rpm`/AppImage install paths have not been executed.
