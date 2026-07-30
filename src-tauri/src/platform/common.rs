@@ -24,6 +24,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(15);
 /// copy chord goes out.
 const MODIFIER_SETTLE: Duration = Duration::from_millis(40);
 
+/// Time given to the foreground app to consume a paste before the clipboard is restored.
+const PASTE_SETTLE: Duration = Duration::from_millis(250);
+
 /// Longest edge of the image sent to the model. Caps the base64 payload without
 /// hurting OCR on realistic crops.
 const MAX_IMAGE_EDGE: u32 = 1920;
@@ -39,45 +42,7 @@ pub fn simulate_copy_and_read(modifier: Key) -> Result<String, CaptureError> {
         .set_text(SENTINEL)
         .map_err(|e| CaptureError::Backend(format!("could not stage the clipboard: {e}")))?;
 
-    let send = || -> Result<(), CaptureError> {
-        let mut enigo = Enigo::new(&EnigoSettings::default()).map_err(|e| {
-            CaptureError::Unsupported(format!("cannot send synthetic keystrokes here: {e}"))
-        })?;
-
-        // The hotkey that got us here is still physically held: a global shortcut fires
-        // on key-*down*, and the default binding is Alt+D. Two things follow, and the
-        // order below is load-bearing for both.
-        //
-        // 1. Alt must come up before the copy chord, or the foreground application sees
-        //    Ctrl+Alt+C, which is not "copy" anywhere — nothing reaches the clipboard
-        //    and the flow reports an empty selection.
-        // 2. Alt must NOT come up on its own. A lone Alt keystroke is what opens the
-        //    window's menu on Windows, and that moves keyboard focus off the control
-        //    holding the selection — which breaks the copy just as thoroughly.
-        //
-        // Pressing the copy modifier first makes the Alt release non-lone, satisfying
-        // both. Measured: with Alt held, chord-only and release-then-chord both copy
-        // nothing; this ordering copies correctly.
-        enigo
-            .key(modifier, Direction::Press)
-            .map_err(|e| CaptureError::Backend(e.to_string()))?;
-
-        let stuck: &[Key] = if matches!(modifier, Key::Meta) {
-            &[Key::Alt, Key::Shift, Key::Control]
-        } else {
-            &[Key::Alt, Key::Shift, Key::Meta]
-        };
-        for held in stuck {
-            let _ = enigo.key(*held, Direction::Release);
-        }
-        std::thread::sleep(MODIFIER_SETTLE);
-        let tapped = enigo.key(Key::Unicode('c'), Direction::Click);
-        // Always let the modifier back up, even if the tap failed.
-        let _ = enigo.key(modifier, Direction::Release);
-        tapped.map_err(|e| CaptureError::Backend(e.to_string()))
-    };
-
-    if let Err(e) = send() {
+    if let Err(e) = send_chord(modifier, 'c') {
         restore_clipboard(saved);
         return Err(e);
     }
@@ -100,6 +65,71 @@ pub fn simulate_copy_and_read(modifier: Key) -> Result<String, CaptureError> {
         Some(text) if !text.trim().is_empty() => Ok(text),
         _ => Err(CaptureError::EmptySelection),
     }
+}
+
+/// Sends `modifier`+`key` to the foreground application.
+///
+/// The hotkey that got us here is still physically held: a global shortcut fires on
+/// key-*down*, and the default bindings are Alt+D and Alt+F. Two things follow, and the
+/// order below is load-bearing for both.
+///
+/// 1. Alt must come up before the chord, or the foreground application sees Ctrl+Alt+C
+///    (or Ctrl+Alt+V), which is not copy or paste anywhere — nothing happens.
+/// 2. Alt must NOT come up on its own. A lone Alt keystroke is what opens the window's
+///    menu on Windows, and that moves keyboard focus off the control holding the
+///    selection, which breaks the chord just as thoroughly.
+///
+/// Pressing the chord's own modifier *first* makes the Alt release non-lone, satisfying
+/// both. Measured against a real selection: with Alt held, chord-only and
+/// release-then-chord both do nothing; this ordering works.
+fn send_chord(modifier: Key, key: char) -> Result<(), CaptureError> {
+    let mut enigo = Enigo::new(&EnigoSettings::default()).map_err(|e| {
+        CaptureError::Unsupported(format!("cannot send synthetic keystrokes here: {e}"))
+    })?;
+
+    enigo
+        .key(modifier, Direction::Press)
+        .map_err(|e| CaptureError::Backend(e.to_string()))?;
+
+    let stuck: &[Key] = if matches!(modifier, Key::Meta) {
+        &[Key::Alt, Key::Shift, Key::Control]
+    } else {
+        &[Key::Alt, Key::Shift, Key::Meta]
+    };
+    for held in stuck {
+        let _ = enigo.key(*held, Direction::Release);
+    }
+    std::thread::sleep(MODIFIER_SETTLE);
+
+    let tapped = enigo.key(Key::Unicode(key), Direction::Click);
+    // Always let the modifier back up, even if the tap failed.
+    let _ = enigo.key(modifier, Direction::Release);
+    tapped.map_err(|e| CaptureError::Backend(e.to_string()))
+}
+
+/// Replaces the current selection by putting `text` on the clipboard and pasting it.
+///
+/// The user's clipboard is saved and restored, so the only lasting change is in their
+/// document. The popup still shows the translation with a Copy button, so nothing is
+/// lost if the target application ignores the paste (a read-only view, for instance).
+pub fn replace_selection(modifier: Key, text: &str) -> Result<(), CaptureError> {
+    let mut clipboard = Clipboard::new()
+        .map_err(|e| CaptureError::Backend(format!("the clipboard is unavailable: {e}")))?;
+
+    let saved = clipboard.get_text().ok();
+
+    clipboard
+        .set_text(text)
+        .map_err(|e| CaptureError::Backend(format!("could not stage the translation: {e}")))?;
+
+    let sent = send_chord(modifier, 'v');
+
+    // Give the target application time to actually read the clipboard before it is put
+    // back; restoring immediately would race the paste it is still processing.
+    std::thread::sleep(PASTE_SETTLE);
+    restore_clipboard(saved);
+
+    sent
 }
 
 /// Never permanently clobber the user's clipboard.

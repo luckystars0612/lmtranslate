@@ -13,14 +13,22 @@ use crate::state::{AppState, RegisteredHotkeys};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Slot {
+    /// Selection into the default target language.
     Text,
+    /// Selection translated into the rewrite language and pasted back over itself.
+    Replace,
     Screenshot,
 }
+
+/// Every slot, so registration and conflict checks cannot fall out of step with each
+/// other by forgetting one.
+pub const ALL_SLOTS: [Slot; 3] = [Slot::Text, Slot::Replace, Slot::Screenshot];
 
 impl Slot {
     pub fn parse(raw: &str) -> Option<Self> {
         match raw {
             "text" => Some(Slot::Text),
+            "replace" => Some(Slot::Replace),
             "screenshot" => Some(Slot::Screenshot),
             _ => None,
         }
@@ -29,7 +37,16 @@ impl Slot {
     pub fn label(self) -> &'static str {
         match self {
             Slot::Text => "select-and-translate",
+            Slot::Replace => "select-and-rewrite",
             Slot::Screenshot => "screenshot-and-translate",
+        }
+    }
+
+    fn accelerator(self, settings: &Settings) -> &String {
+        match self {
+            Slot::Text => &settings.hotkey_text,
+            Slot::Replace => &settings.hotkey_replace,
+            Slot::Screenshot => &settings.hotkey_screenshot,
         }
     }
 }
@@ -40,7 +57,7 @@ pub fn parse(accelerator: &str) -> Result<Shortcut, String> {
         .map_err(|e| format!("\"{accelerator}\" is not a valid shortcut ({e})."))
 }
 
-/// Registers both hotkeys, returning a human-readable problem per hotkey that failed.
+/// Registers every hotkey, returning a human-readable problem per hotkey that failed.
 pub fn apply(app: &AppHandle, settings: &Settings) -> Vec<String> {
     let shortcuts = app.global_shortcut();
     let _ = shortcuts.unregister_all();
@@ -48,14 +65,13 @@ pub fn apply(app: &AppHandle, settings: &Settings) -> Vec<String> {
     let mut problems = Vec::new();
     let mut registered = RegisteredHotkeys::default();
 
-    for (slot, accelerator) in [
-        (Slot::Text, &settings.hotkey_text),
-        (Slot::Screenshot, &settings.hotkey_screenshot),
-    ] {
+    for slot in ALL_SLOTS {
+        let accelerator = slot.accelerator(settings);
         match parse(accelerator) {
             Ok(shortcut) => match shortcuts.register(shortcut) {
                 Ok(()) => match slot {
                     Slot::Text => registered.text = Some(shortcut),
+                    Slot::Replace => registered.replace_in_place = Some(shortcut),
                     Slot::Screenshot => registered.screenshot = Some(shortcut),
                 },
                 Err(e) => problems.push(format!(
@@ -93,6 +109,8 @@ pub fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, state: ShortcutState) {
         };
         if registered.text.as_ref() == Some(shortcut) {
             Some(Slot::Text)
+        } else if registered.replace_in_place.as_ref() == Some(shortcut) {
+            Some(Slot::Replace)
         } else if registered.screenshot.as_ref() == Some(shortcut) {
             Some(Slot::Screenshot)
         } else {
@@ -101,7 +119,8 @@ pub fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, state: ShortcutState) {
     };
 
     match slot {
-        Some(Slot::Text) => flows::start_text_flow(app.clone()),
+        Some(Slot::Text) => flows::start_text_flow(app.clone(), flows::TextMode::Popup),
+        Some(Slot::Replace) => flows::start_text_flow(app.clone(), flows::TextMode::Replace),
         Some(Slot::Screenshot) => flows::start_screenshot_flow(app.clone()),
         None => {}
     }
@@ -119,25 +138,25 @@ pub fn probe(app: &AppHandle, accelerator: &str, slot: Slot) -> (bool, String) {
         .map(|s| s.settings_snapshot())
         .unwrap_or_default();
 
-    let other = match slot {
-        Slot::Text => &settings.hotkey_screenshot,
-        Slot::Screenshot => &settings.hotkey_text,
-    };
-    if parse(other).ok() == Some(shortcut) {
-        return (
-            false,
-            "That combination is already used by the other LM Translate hotkey.".into(),
-        );
+    for other in ALL_SLOTS {
+        if other == slot {
+            continue;
+        }
+        if parse(other.accelerator(&settings)).ok() == Some(shortcut) {
+            return (
+                false,
+                format!(
+                    "That combination is already used by LM Translate's {} hotkey.",
+                    other.label()
+                ),
+            );
+        }
     }
 
     let shortcuts = app.global_shortcut();
 
     // Already ours for this slot — nothing to test.
-    let currently_ours = match slot {
-        Slot::Text => &settings.hotkey_text,
-        Slot::Screenshot => &settings.hotkey_screenshot,
-    };
-    if parse(currently_ours).ok() == Some(shortcut) {
+    if parse(slot.accelerator(&settings)).ok() == Some(shortcut) {
         return (true, "Available — this is the current shortcut.".into());
     }
 

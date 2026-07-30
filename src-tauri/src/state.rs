@@ -15,6 +15,7 @@ use crate::windows::popup_window::{Anchor, PopupState};
 #[derive(Default)]
 pub struct RegisteredHotkeys {
     pub text: Option<Shortcut>,
+    pub replace_in_place: Option<Shortcut>,
     pub screenshot: Option<Shortcut>,
 }
 

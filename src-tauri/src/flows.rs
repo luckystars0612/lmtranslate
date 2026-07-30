@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
 use crate::capture;
-use crate::config::{self, Settings, REQUEST_TIMEOUT_SECS};
+use crate::config::{Settings, REQUEST_TIMEOUT_SECS};
 use crate::platform::CaptureError;
 use crate::state::AppState;
 use crate::translate::types::{InputKind, ProviderError, TranslateRequest};
@@ -24,7 +24,17 @@ const OVERLAY_TEARDOWN_LIMIT: Duration = Duration::from_millis(700);
 
 // ── Flow 1: select and translate ───────────────────────────────────────────
 
-pub fn start_text_flow(app: AppHandle) {
+/// What a selection hotkey should do with the translation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextMode {
+    /// Translate into the default target language and show it in the popup.
+    Popup,
+    /// Translate into the rewrite language and paste it over the selection, replacing
+    /// what the user wrote.
+    Replace,
+}
+
+pub fn start_text_flow(app: AppHandle, mode: TextMode) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
@@ -39,13 +49,20 @@ pub fn start_text_flow(app: AppHandle) {
     }
 
     let generation = state.next_generation();
-    let settings = state.settings_snapshot();
+    let mut settings = state.settings_snapshot();
     drop(state);
 
-    tauri::async_runtime::spawn(text_flow(app, generation, settings));
+    // Resolved into the per-flow copy of the settings, so every downstream consumer —
+    // the popup's route line and language dropdown, the request, the cache key — reads
+    // the language this particular press asked for without any extra plumbing.
+    if mode == TextMode::Replace {
+        settings.target_lang = settings.replace_lang.clone();
+    }
+
+    tauri::async_runtime::spawn(text_flow(app, generation, settings, mode));
 }
 
-async fn text_flow(app: AppHandle, generation: u64, settings: Settings) {
+async fn text_flow(app: AppHandle, generation: u64, settings: Settings, mode: TextMode) {
     // A popup left over from an earlier translation may still hold focus, and the
     // synthetic Ctrl+C has to reach the user's application rather than us.
     {
@@ -99,15 +116,28 @@ async fn text_flow(app: AppHandle, generation: u64, settings: Settings) {
         }
     };
 
-    // The copy is done, so it is now safe to take focus — Esc and the copy button
-    // both need it.
-    popup_window::focus(&app);
+    // In popup mode the copy is done, so it is now safe to take focus — Esc and the copy
+    // button both need it. In replace mode we must NOT: the paste that comes after the
+    // translation has to land in the user's application, and focusing the popup would
+    // send Ctrl+V to us instead.
+    if mode == TextMode::Popup {
+        popup_window::focus(&app);
+    }
+
     popup_window::update(
         &app,
         PopupState::loading_with_original(&settings, "text", text.clone()),
     );
 
-    run_translation(app, generation, InputKind::Text(text), "text", settings).await;
+    run_translation(
+        app,
+        generation,
+        InputKind::Text(text),
+        "text",
+        settings,
+        mode == TextMode::Replace,
+    )
+    .await;
 }
 
 // ── Flow 2: screenshot and translate ───────────────────────────────────────
@@ -291,6 +321,8 @@ async fn screenshot_flow(
         InputKind::ImageBase64(base64_png),
         "image",
         settings,
+        // A screen region is not an editable selection, so there is nothing to paste over.
+        false,
     )
     .await;
 }
@@ -333,18 +365,11 @@ pub fn retranslate(app: AppHandle, target_lang: String) -> Result<(), String> {
         return Err("A translation is already running.".into());
     }
 
-    // Switching language in the popup sticks — it becomes the new default.
-    let settings = {
-        let mut guard = state
-            .settings
-            .write()
-            .map_err(|_| "settings are locked".to_string())?;
-        guard.target_lang = target_lang;
-        guard.clone()
-    };
-    if let Err(e) = config::save(&state.config_path, &settings) {
-        state.logger.warn(format!("could not persist settings: {e}"));
-    }
+    // A per-result override, not a settings change. Now that two languages are
+    // configured and each has its own hotkey, persisting the popup's dropdown would
+    // silently overwrite whichever default the user did not mean to touch.
+    let mut settings = state.settings_snapshot();
+    settings.target_lang = target_lang;
 
     let generation = state.next_generation();
     drop(state);
@@ -369,6 +394,9 @@ pub fn retranslate(app: AppHandle, target_lang: String) -> Result<(), String> {
         input,
         source_kind,
         settings,
+        // Re-running from the popup's dropdown never pastes: the user is reading, and by
+        // now the original selection may not even be there.
+        false,
     ));
 
     Ok(())
@@ -382,6 +410,7 @@ async fn run_translation(
     input: InputKind,
     source_kind: &'static str,
     settings: Settings,
+    replace: bool,
 ) {
     let started = Instant::now();
     let kind = input.label();
@@ -410,10 +439,14 @@ async fn run_translation(
                     *slot = Some(input.clone());
                 }
             }
+            // A cache hit still has to paste, or Alt+F would silently do nothing the
+            // second time you pressed it on the same text.
+            let note = paste_over_selection(&app, replace, &translated).await;
             settle(
                 &app,
                 generation,
-                PopupState::result(&settings, source_kind, original_display, translated),
+                PopupState::result(&settings, source_kind, original_display, translated)
+                    .with_note(note),
                 &settings,
                 true,
             );
@@ -524,10 +557,13 @@ async fn run_translation(
                 }
             }
 
+            let note = paste_over_selection(&app, replace, &translated).await;
+
             settle(
                 &app,
                 generation,
-                PopupState::result(&settings, source_kind, original, translated),
+                PopupState::result(&settings, source_kind, original, translated)
+                    .with_note(note),
                 &settings,
                 true,
             );
@@ -547,6 +583,40 @@ async fn run_translation(
                 &settings,
                 false,
             );
+        }
+    }
+}
+
+/// Pastes the translation over the selection, returning a short status for the popup's
+/// footer. Returns an empty string when this was not a rewrite.
+///
+/// Failure is never fatal: the popup keeps the translation and its Copy button, so a
+/// read-only target or a Wayland session costs the user a keystroke, not the result.
+async fn paste_over_selection(app: &AppHandle, replace: bool, translated: &str) -> String {
+    if !replace || translated.trim().is_empty() {
+        return String::new();
+    }
+
+    let handle = app.clone();
+    let text = translated.to_string();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let state = handle.state::<AppState>();
+        state.platform.replace_selection(&text)
+    })
+    .await;
+
+    match outcome {
+        Ok(Ok(())) => {
+            log_info(app, "replaced the selection in place");
+            "REPLACED THE SELECTION".into()
+        }
+        Ok(Err(error)) => {
+            log_warn(app, &format!("could not replace the selection: {error}"));
+            "COULD NOT REPLACE — USE COPY".into()
+        }
+        Err(join_error) => {
+            log_error(app, &format!("paste task panicked: {join_error}"));
+            "COULD NOT REPLACE — USE COPY".into()
         }
     }
 }

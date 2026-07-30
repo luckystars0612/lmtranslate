@@ -152,10 +152,23 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    // Naming the languages makes the two selection entries tell the user which is which.
+    let settings = app
+        .try_state::<AppState>()
+        .map(|state| state.settings_snapshot())
+        .unwrap_or_default();
+
     let translate_selection = MenuItem::with_id(
         app,
         "translate-selection",
-        "Translate selection",
+        format!("Translate selection into {}", settings.target_lang),
+        true,
+        None::<&str>,
+    )?;
+    let rewrite_selection = MenuItem::with_id(
+        app,
+        "rewrite-selection",
+        format!("Rewrite selection in {}", settings.replace_lang),
         true,
         None::<&str>,
     )?;
@@ -174,6 +187,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         app,
         &[
             &translate_selection,
+            &rewrite_selection,
             &translate_region,
             &separator,
             &settings_item,
@@ -186,7 +200,12 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "translate-selection" => flows::start_text_flow(app.clone()),
+            "translate-selection" => {
+                flows::start_text_flow(app.clone(), flows::TextMode::Popup)
+            }
+            "rewrite-selection" => {
+                flows::start_text_flow(app.clone(), flows::TextMode::Replace)
+            }
             "translate-region" => flows::start_screenshot_flow(app.clone()),
             "settings" => {
                 if let Err(e) = settings_window::open(app) {

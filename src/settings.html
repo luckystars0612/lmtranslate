@@ -70,6 +70,23 @@
             <p class="note">Pick from the list or type any language name.</p>
           </div>
         </div>
+
+        <div class="row">
+          <label for="replaceLang">Rewrite into</label>
+          <div class="field-stack">
+            <input
+              id="replaceLang"
+              list="langList"
+              type="text"
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <p class="note">
+              The rewrite hotkey translates your selection into this language and pastes
+              it back over the selection, replacing what you wrote.
+            </p>
+          </div>
+        </div>
       </section>
 
       <!-- Hotkeys -------------------------------------------------------- -->
@@ -81,6 +98,14 @@
           <div class="field-stack">
             <button class="hotkey" id="hkText" type="button"></button>
             <p class="status" id="hkTextStatus" hidden></p>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="hkReplace">Rewrite in place</label>
+          <div class="field-stack">
+            <button class="hotkey" id="hkReplace" type="button"></button>
+            <p class="status" id="hkReplaceStatus" hidden></p>
           </div>
         </div>
 

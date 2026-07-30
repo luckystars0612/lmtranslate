@@ -43,6 +43,9 @@ pub struct PlatformCapabilities {
     pub backend: String,
     pub supports_text_selection: bool,
     pub supports_screen_capture: bool,
+    /// Whether the session allows pasting a translation back over the selection.
+    /// False on Wayland, which forbids synthetic input entirely.
+    pub supports_replace: bool,
     pub notes: Vec<String>,
     /// macOS only: enigo needs the Accessibility permission before it can send keys.
     pub needs_accessibility_prompt: bool,
@@ -54,6 +57,9 @@ pub trait PlatformCapture: Send + Sync {
     /// `x`/`y` are global, physical screen coordinates. Returns PNG bytes.
     fn capture_region(&self, x: i32, y: i32, width: u32, height: u32)
         -> Result<Vec<u8>, CaptureError>;
+
+    /// Pastes `text` over whatever is currently selected, replacing it in place.
+    fn replace_selection(&self, text: &str) -> Result<(), CaptureError>;
 
     fn capabilities(&self) -> PlatformCapabilities;
 }

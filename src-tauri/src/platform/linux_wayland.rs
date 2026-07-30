@@ -95,6 +95,17 @@ impl PlatformCapture for LinuxWaylandCapture {
         common::encode_png(common::downscale(cropped))
     }
 
+    fn replace_selection(&self, _text: &str) -> Result<(), CaptureError> {
+        // Pasting means synthesising Ctrl+V, and Wayland forbids injecting input into
+        // another application outside the RemoteDesktop portal's interactive session.
+        Err(CaptureError::Unsupported(
+            "Wayland does not allow one application to paste into another, so the \
+             selection cannot be replaced in place here. The translation is on your \
+             clipboard — press Ctrl+V yourself, or use an X11 session."
+                .into(),
+        ))
+    }
+
     fn capabilities(&self) -> PlatformCapabilities {
         PlatformCapabilities {
             os: "linux".into(),
@@ -102,6 +113,7 @@ impl PlatformCapture for LinuxWaylandCapture {
             backend: "Linux/Wayland — primary selection, xdg-desktop-portal capture".into(),
             supports_text_selection: true,
             supports_screen_capture: true,
+            supports_replace: false,
             notes: vec![
                 "Wayland forbids synthetic keystrokes, so highlighted text is read from \
                  the primary selection instead. Compositors that do not implement it \

@@ -23,14 +23,32 @@ popup that appears where you are already looking.
 
 | Hotkey | Flow |
 |---|---|
-| `Alt+D` | **Select and translate.** Highlight text anywhere, press the key, read the translation. |
+| `Alt+D` | **Select and translate.** Highlight text anywhere, press the key, read the translation in a popup. |
+| `Alt+F` | **Rewrite in place.** Highlight something you wrote, press the key, and it is *replaced* by the translation — write in your own language, send in English. |
 | `Alt+S` | **Screenshot and translate.** Press the key, drag a box over anything on screen, read the translation. |
 
-Neither flow has an icon to click or a confirmation step: the hotkey *is* the trigger,
-and releasing the drag *is* the trigger. Both hotkeys are configurable.
+No flow has an icon to click or a confirmation step: the hotkey *is* the trigger, and
+releasing the drag *is* the trigger. All three hotkeys are configurable, and so are both
+languages — `Alt+D` translates into your **target language**, `Alt+F` into your
+**rewrite language**.
 
 It runs in the system tray with no main window, and behaves identically no matter which
 application is in the foreground — browser, native app, IDE, terminal, PDF viewer.
+
+### Rewrite in place
+
+`Alt+F` is the one flow that edits your document rather than just showing you something.
+Draft the message in the language you think in, select it, press the key, and the
+selection is replaced by natural English (or whatever you set **Rewrite into** to).
+
+- Your clipboard is **saved and restored** around the paste, so the only lasting change
+  is in your document.
+- The popup still shows the translation with a **Copy translation** button, so nothing is
+  lost if the target application ignores the paste — a read-only view, for instance. The
+  footer says whether the replacement actually landed.
+- It needs to paste, so it does **not** work on Wayland, which forbids one application
+  from injecting input into another. There the popup reports that and you can copy
+  manually. Settings → Advanced always states whether this session supports it.
 
 ### Features
 
@@ -206,8 +224,9 @@ Open **Settings** from the tray icon and fill in the Provider section:
 - **API key** — masked. **Test connection** does a cheap round trip and reports pass or
   fail inline instead of saving silently.
 
-Target language, both hotkeys, launch-on-login, popup auto-close and theme are all
-optional and persist across restarts.
+**Target language** (what `Alt+D` translates into), **Rewrite into** (what `Alt+F`
+replaces your selection with, default English), all three hotkeys, launch-on-login, popup
+auto-close and theme are optional and persist across restarts.
 
 ### Where your files live
 
@@ -308,18 +327,22 @@ larger model before editing prompts.
 per platform, so each has its own backend behind one trait. **Settings → Advanced** always
 shows which backend is active and what it can do on the current session.
 
-| Platform | Selection | Capture |
-|---|---|---|
-| **Windows** | synthetic `Ctrl+C`, clipboard saved and restored | Desktop Duplication |
-| **macOS** | synthetic `Cmd+C`, clipboard saved and restored | CoreGraphics |
-| **Linux / X11** | **PRIMARY selection** — nothing simulated, clipboard untouched | `GetImage` on the root window |
-| **Linux / Wayland** | **primary-selection protocol** — no synthetic input is possible | `xdg-desktop-portal` |
+| Platform | Selection | Capture | Rewrite in place |
+|---|---|---|---|
+| **Windows** | synthetic `Ctrl+C`, clipboard saved and restored | Desktop Duplication | `Ctrl+V` |
+| **macOS** | synthetic `Cmd+C`, clipboard saved and restored | CoreGraphics | `Cmd+V` |
+| **Linux / X11** | **PRIMARY selection** — nothing simulated, clipboard untouched | `GetImage` on the root window | `Ctrl+V` |
+| **Linux / Wayland** | **primary-selection protocol** — no synthetic input is possible | `xdg-desktop-portal` | **not possible** |
 
 A detail worth knowing: a global hotkey fires on key-*down*, so `Alt` is still held when
-the copy chord goes out. Sending `Ctrl+C` then would be read as `Ctrl+Alt+C`, which is not
-"copy" anywhere — and releasing `Alt` on its own opens the window menu, moving focus off
-the selection. The copy modifier is therefore pressed *first*, which makes the `Alt`
-release non-lone and satisfies both constraints.
+the copy or paste chord goes out. Sending `Ctrl+C` then would be read as `Ctrl+Alt+C`,
+which is not "copy" anywhere — and releasing `Alt` on its own opens the window menu,
+moving focus off the selection. The chord's own modifier is therefore pressed *first*,
+which makes the `Alt` release non-lone and satisfies both constraints. The same ordering
+is what makes `Alt+F`'s paste land.
+
+The rewrite flow also never lets the popup take focus, since `Ctrl+V` has to reach your
+application rather than ours.
 
 On macOS the first run needs **Accessibility** (to send the copy chord) and **Screen
 Recording** (to capture) in System Settings → Privacy & Security. Settings → Advanced has

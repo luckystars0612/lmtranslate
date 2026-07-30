@@ -21,6 +21,10 @@ impl PlatformCapture for MacosCapture {
         common::capture_region_xcap(x, y, width, height)
     }
 
+    fn replace_selection(&self, text: &str) -> Result<(), CaptureError> {
+        common::replace_selection(Key::Meta, text)
+    }
+
     fn capabilities(&self) -> PlatformCapabilities {
         PlatformCapabilities {
             os: "macos".into(),
@@ -28,6 +32,7 @@ impl PlatformCapture for MacosCapture {
             backend: "macOS — synthetic Cmd+C, CoreGraphics capture".into(),
             supports_text_selection: true,
             supports_screen_capture: true,
+            supports_replace: true,
             notes: vec![
                 "Sending Cmd+C needs the Accessibility permission; capture needs Screen \
                  Recording. Grant both in System Settings > Privacy & Security."

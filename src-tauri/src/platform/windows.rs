@@ -20,6 +20,10 @@ impl PlatformCapture for WindowsCapture {
         common::capture_region_xcap(x, y, width, height)
     }
 
+    fn replace_selection(&self, text: &str) -> Result<(), CaptureError> {
+        common::replace_selection(Key::Control, text)
+    }
+
     fn capabilities(&self) -> PlatformCapabilities {
         PlatformCapabilities {
             os: "windows".into(),
@@ -27,6 +31,7 @@ impl PlatformCapture for WindowsCapture {
             backend: "Windows — synthetic Ctrl+C, Desktop Duplication capture".into(),
             supports_text_selection: true,
             supports_screen_capture: true,
+            supports_replace: true,
             notes: vec![
                 "Your clipboard is saved before the copy and restored right after.".into(),
             ],

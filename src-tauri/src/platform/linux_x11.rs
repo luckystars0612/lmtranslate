@@ -33,6 +33,10 @@ impl PlatformCapture for LinuxX11Capture {
         capture_region_x11(x, y, width, height)
     }
 
+    fn replace_selection(&self, text: &str) -> Result<(), CaptureError> {
+        common::replace_selection(Key::Control, text)
+    }
+
     fn capabilities(&self) -> PlatformCapabilities {
         PlatformCapabilities {
             os: "linux".into(),
@@ -41,6 +45,7 @@ impl PlatformCapture for LinuxX11Capture {
                 .into(),
             supports_text_selection: true,
             supports_screen_capture: true,
+            supports_replace: true,
             notes: vec![
                 "Highlighted text is read straight from the X11 PRIMARY selection, so no \
                  copy is simulated and the clipboard is left untouched."

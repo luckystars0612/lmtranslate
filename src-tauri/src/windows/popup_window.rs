@@ -51,6 +51,8 @@ pub struct PopupState {
     pub error_detail: String,
     pub error_hint: String,
     pub can_retranslate: bool,
+    /// Short status shown in the footer, e.g. whether a rewrite replaced the selection.
+    pub note: String,
     /// True for errors the user can actually act on, which puts an "Open Settings"
     /// button on the popup instead of leaving them to find it in the tray.
     pub offer_settings: bool,
@@ -70,6 +72,7 @@ impl Default for PopupState {
             error_detail: String::new(),
             error_hint: String::new(),
             can_retranslate: false,
+            note: String::new(),
             offer_settings: false,
             theme: "system".into(),
             languages: COMMON_LANGUAGES.iter().map(|s| s.to_string()).collect(),
@@ -144,6 +147,11 @@ impl PopupState {
     /// Marks an error state as fixable in Settings.
     pub fn offering_settings(mut self) -> Self {
         self.offer_settings = true;
+        self
+    }
+
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.note = note.into();
         self
     }
 }

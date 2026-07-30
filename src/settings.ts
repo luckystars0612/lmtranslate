@@ -18,7 +18,9 @@ interface Settings {
   provider: string;
   providers: Record<string, ProviderConfig>;
   targetLang: string;
+  replaceLang: string;
   hotkeyText: string;
+  hotkeyReplace: string;
   hotkeyScreenshot: string;
   launchOnLogin: boolean;
   popupAutoCloseMs: number;
@@ -31,6 +33,7 @@ interface PlatformReport {
   backend: string;
   supportsTextSelection: boolean;
   supportsScreenCapture: boolean;
+  supportsReplace: boolean;
   notes: string[];
   needsAccessibilityPrompt: boolean;
   configPath: string;
@@ -52,8 +55,10 @@ const revealKey = el<HTMLButtonElement>("revealKey");
 const testConn = el<HTMLButtonElement>("testConn");
 const connStatus = el<HTMLParagraphElement>("connStatus");
 const targetLang = el<HTMLInputElement>("targetLang");
+const replaceLang = el<HTMLInputElement>("replaceLang");
 const langList = el<HTMLDataListElement>("langList");
 const hkText = el<HTMLButtonElement>("hkText");
+const hkReplace = el<HTMLButtonElement>("hkReplace");
 const hkShot = el<HTMLButtonElement>("hkShot");
 const autoClose = el<HTMLSelectElement>("autoClose");
 const themeSel = el<HTMLSelectElement>("theme");
@@ -107,7 +112,9 @@ function renderForm() {
   providerSel.value = settings.provider;
   renderProviderFields();
   targetLang.value = settings.targetLang;
+  replaceLang.value = settings.replaceLang;
   hkText.textContent = settings.hotkeyText || "Click to set";
+  hkReplace.textContent = settings.hotkeyReplace || "Click to set";
   hkShot.textContent = settings.hotkeyScreenshot || "Click to set";
   autoClose.value = String(settings.popupAutoCloseMs);
   themeSel.value = settings.theme;
@@ -124,6 +131,7 @@ async function save() {
     model: model.value.trim(),
   };
   settings.targetLang = targetLang.value.trim() || settings.targetLang;
+  settings.replaceLang = replaceLang.value.trim() || settings.replaceLang;
   settings.popupAutoCloseMs = Number(autoClose.value);
   settings.theme = themeSel.value as Settings["theme"];
   settings.launchOnLogin = launchOnLogin.checked;
@@ -181,18 +189,28 @@ function accelFrom(e: KeyboardEvent): string | null {
   return [...mods, key].join("+");
 }
 
-function wireHotkey(
-  button: HTMLButtonElement,
-  status: HTMLElement,
-  slot: "text" | "screenshot",
-) {
+/** Matches `hotkeys::Slot::parse` on the Rust side. */
+type Slot = "text" | "replace" | "screenshot";
+
+function hotkeyOf(slot: Slot): string {
+  if (slot === "text") return settings.hotkeyText;
+  if (slot === "replace") return settings.hotkeyReplace;
+  return settings.hotkeyScreenshot;
+}
+
+function setHotkey(slot: Slot, accel: string) {
+  if (slot === "text") settings.hotkeyText = accel;
+  else if (slot === "replace") settings.hotkeyReplace = accel;
+  else settings.hotkeyScreenshot = accel;
+}
+
+function wireHotkey(button: HTMLButtonElement, status: HTMLElement, slot: Slot) {
   let recording = false;
 
   const stop = () => {
     recording = false;
     button.dataset.recording = "false";
-    const value = slot === "text" ? settings.hotkeyText : settings.hotkeyScreenshot;
-    button.textContent = value || "Click to set";
+    button.textContent = hotkeyOf(slot) || "Click to set";
     // Put the real hotkeys back.
     void invoke("end_hotkey_capture");
   };
@@ -239,8 +257,7 @@ function wireHotkey(
     setStatus(status, check);
 
     if (check.tone !== "bad") {
-      if (slot === "text") settings.hotkeyText = accel;
-      else settings.hotkeyScreenshot = accel;
+      setHotkey(slot, accel);
       await save();
     }
     stop();
@@ -255,7 +272,7 @@ providerSel.addEventListener("change", async () => {
   await save();
 });
 
-for (const node of [baseUrl, model, apiKey, targetLang]) {
+for (const node of [baseUrl, model, apiKey, targetLang, replaceLang]) {
   node.addEventListener("change", () => void save());
 }
 for (const node of [autoClose, themeSel, launchOnLogin]) {
@@ -329,12 +346,14 @@ async function boot() {
 
   renderForm();
   wireHotkey(hkText, el<HTMLElement>("hkTextStatus"), "text");
+  wireHotkey(hkReplace, el<HTMLElement>("hkReplaceStatus"), "replace");
   wireHotkey(hkShot, el<HTMLElement>("hkShotStatus"), "screenshot");
 
   const report = await invoke<PlatformReport>("platform_report");
-  platform.textContent = `${report.backend}  ·  selection ${
-    report.supportsTextSelection ? "supported" : "unavailable"
-  }  ·  capture ${report.supportsScreenCapture ? "supported" : "unavailable"}`;
+  platform.textContent = `${report.backend}
+selection ${report.supportsTextSelection ? "supported" : "unavailable"}  ·  capture ${
+    report.supportsScreenCapture ? "supported" : "unavailable"
+  }  ·  rewrite in place ${report.supportsReplace ? "supported" : "unavailable"}`;
   platformNotes.replaceChildren(
     ...[...report.notes, `Settings file: ${report.configPath}`, `Log file: ${report.logPath}`].map(
       (n) => {

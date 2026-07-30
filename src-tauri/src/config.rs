@@ -8,8 +8,12 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 pub const DEFAULT_HOTKEY_TEXT: &str = "Alt+D";
+pub const DEFAULT_HOTKEY_REPLACE: &str = "Alt+F";
 pub const DEFAULT_HOTKEY_SCREENSHOT: &str = "Alt+S";
 pub const DEFAULT_TARGET_LANG: &str = "Vietnamese";
+/// The rewrite direction: you have written something in your own language and want the
+/// selection replaced by this language instead.
+pub const DEFAULT_REPLACE_LANG: &str = "English";
 
 /// Ceiling for a single translation call, popup error state included.
 pub const REQUEST_TIMEOUT_SECS: u64 = 45;
@@ -123,7 +127,10 @@ pub struct Settings {
     /// Per-provider credentials, so switching provider does not lose the other key.
     pub providers: BTreeMap<String, ProviderConfig>,
     pub target_lang: String,
+    /// The language the rewrite hotkey translates into, replacing the selection.
+    pub replace_lang: String,
     pub hotkey_text: String,
+    pub hotkey_replace: String,
     pub hotkey_screenshot: String,
     pub launch_on_login: bool,
     /// 0 means "stay until dismissed".
@@ -151,7 +158,9 @@ impl Default for Settings {
             provider: PROVIDERS[0].id.to_string(),
             providers,
             target_lang: DEFAULT_TARGET_LANG.to_string(),
+            replace_lang: DEFAULT_REPLACE_LANG.to_string(),
             hotkey_text: DEFAULT_HOTKEY_TEXT.to_string(),
+            hotkey_replace: DEFAULT_HOTKEY_REPLACE.to_string(),
             hotkey_screenshot: DEFAULT_HOTKEY_SCREENSHOT.to_string(),
             launch_on_login: false,
             popup_auto_close_ms: 0,
@@ -184,8 +193,14 @@ impl Settings {
         if self.target_lang.trim().is_empty() {
             self.target_lang = defaults.target_lang;
         }
+        if self.replace_lang.trim().is_empty() {
+            self.replace_lang = defaults.replace_lang;
+        }
         if self.hotkey_text.trim().is_empty() {
             self.hotkey_text = defaults.hotkey_text;
+        }
+        if self.hotkey_replace.trim().is_empty() {
+            self.hotkey_replace = defaults.hotkey_replace;
         }
         if self.hotkey_screenshot.trim().is_empty() {
             self.hotkey_screenshot = defaults.hotkey_screenshot;

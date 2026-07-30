@@ -161,6 +161,8 @@ input[type="password"] {
   padding-top: 6px;
   font-family: var(--font-meta);
   font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-line;
   color: var(--text);
 }
 

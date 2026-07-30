@@ -12,6 +12,8 @@ interface PopupState {
   errorDetail: string;
   errorHint: string;
   canRetranslate: boolean;
+  /** Short footer status, e.g. whether a rewrite replaced the selection. */
+  note: string;
   /** True for errors the user can actually fix in Settings. */
   offerSettings: boolean;
   theme: "system" | "light" | "dark";
@@ -102,7 +104,8 @@ function render(s: PopupState) {
     } else {
       translated.textContent = s.translated;
       foot.hidden = false;
-      stat.textContent = `${[...s.translated].length} CHARS`;
+      // A rewrite's outcome matters more than the character count.
+      stat.textContent = s.note || `${[...s.translated].length} CHARS`;
       resetCopyButton();
     }
   }
