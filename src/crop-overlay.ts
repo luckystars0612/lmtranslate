@@ -85,41 +85,81 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
-// The overlay the user dragged on tells the others to stand down, so a stray
-// pointerup elsewhere cannot fire a second capture.
-void listen("crop:dismiss", () => {
-  settled = true;
-});
-
-// Rust captured the screen before this window existed, and keeps the window hidden
-// until it is told the frame is painted, so the user never sees the live screen flash
-// through first. With no frame (or a failure) the overlay simply crops live.
+// This window is built once and reused: Rust hides it between crops and sends
+// "crop:open" when the next one starts. Rust captured the screen before showing
+// anything and keeps the window hidden until it hears the frame is in, so the live
+// screen never flashes through first. With no frame (or a failure) it crops live.
 const frame = document.getElementById("frame") as HTMLImageElement;
+let frameUrl: string | null = null;
+/** Bumped per open and per dismiss, so a slow step from an earlier crop gives up. */
+let token = 0;
 
-async function showFrame() {
+function dropFrame() {
+  frame.hidden = true;
+  frame.removeAttribute("src");
+  if (frameUrl) URL.revokeObjectURL(frameUrl);
+  frameUrl = null;
+}
+
+async function prepare() {
+  const mine = ++token;
+  // The page can load (and run this) before any crop has been asked for.
+  if (!(await invoke<boolean>("crop_active")) || mine !== token) return;
+
+  settled = false;
+  anchor = null;
+  marquee.hidden = true;
+  document.body.dataset.dragging = "false";
+  void applyTheme();
+
   try {
     const png = await invoke<ArrayBuffer>("crop_frame");
+    if (mine !== token) return;
+    dropFrame();
     if (png && png.byteLength > 0) {
-      const url = URL.createObjectURL(new Blob([png], { type: "image/png" }));
-      frame.src = url;
-      // A hidden window may hold off decoding until it is shown; do not wait on that.
-      await Promise.race([frame.decode(), new Promise((done) => setTimeout(done, 400))]);
+      frameUrl = URL.createObjectURL(new Blob([png], { type: "image/png" }));
+      frame.src = frameUrl;
+      // Wait for the load, not for decode(): a hidden window may hold decoding back
+      // until it is shown, and waiting on that is what kept the overlay from appearing.
+      await new Promise((done) => {
+        frame.onload = done;
+        frame.onerror = done;
+        setTimeout(done, 300);
+      });
+      if (mine !== token) return;
       frame.hidden = false;
     }
   } catch {
-    frame.hidden = true;
+    dropFrame();
   }
-  void invoke("crop_ready");
+  if (mine === token) {
+    void invoke("crop_ready");
+    window.focus();
+  }
 }
 
-void showFrame();
+// The overlay the user dragged on tells the others to stand down, so a stray
+// pointerup elsewhere cannot fire a second capture. The frame is let go a moment later,
+// once Rust has hidden the window, so the live screen never shows through it.
+void listen("crop:dismiss", () => {
+  settled = true;
+  const mine = ++token;
+  setTimeout(() => {
+    if (mine === token) dropFrame();
+  }, 250);
+});
 
-void invoke<string>("app_theme")
-  .then((theme) => {
-    if (theme === "light" || theme === "dark") {
-      document.documentElement.dataset.theme = theme;
-    }
-  })
-  .catch(() => {});
+void listen("crop:open", () => void prepare());
 
-window.focus();
+async function applyTheme() {
+  try {
+    const theme = await invoke<string>("app_theme");
+    if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+    else delete document.documentElement.dataset.theme;
+  } catch {
+    // Keep the current theme.
+  }
+}
+
+// The page may finish loading after the open event was sent; catch up if so.
+void prepare();

@@ -334,7 +334,14 @@ pub fn crop_cancel(app: AppHandle) {
 /// Raw bytes rather than JSON: a 4K frame would otherwise be serialised number by number.
 #[tauri::command]
 pub fn crop_frame(app: AppHandle, window: tauri::WebviewWindow) -> tauri::ipc::Response {
-    tauri::ipc::Response::new(crop_overlay::take_frame_png(&app, window.label()))
+    tauri::ipc::Response::new(crop_overlay::frame_png(&app, window.label()))
+}
+
+/// Whether a crop is in progress. A reused overlay asks this when its page loads, in
+/// case the open event fired before it was listening.
+#[tauri::command]
+pub fn crop_active(app: AppHandle) -> bool {
+    crop_overlay::is_active(&app)
 }
 
 /// The overlay has its frame painted and can be shown.

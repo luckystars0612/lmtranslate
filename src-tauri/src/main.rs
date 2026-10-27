@@ -23,7 +23,7 @@ use tauri_plugin_autostart::MacosLauncher;
 use crate::config::Settings;
 use crate::logger::Logger;
 use crate::state::AppState;
-use crate::windows::{selection_bubble, settings_window};
+use crate::windows::{crop_overlay, selection_bubble, settings_window};
 
 fn main() {
     tauri::Builder::default()
@@ -61,6 +61,7 @@ fn main() {
             commands::crop_cancel,
             commands::crop_frame,
             commands::crop_ready,
+            commands::crop_active,
             commands::bubble_action,
             commands::speak,
             commands::stop_speaking,
@@ -163,6 +164,9 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // Always watched where the backend can: the setting is checked per selection, so it
     // can be switched on and off without a restart.
     selection_bubble::start(&handle);
+
+    // Built ahead of the first Alt+S — see `crop_overlay` for why.
+    crop_overlay::prewarm(&handle);
 
     // `lmtranslate --settings` opens Settings straight away, so the app can be given a
     // desktop shortcut that goes somewhere useful instead of only living in the tray.

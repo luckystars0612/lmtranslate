@@ -123,6 +123,10 @@ impl AppState {
         self.overlay_open.store(false, Ordering::SeqCst);
     }
 
+    pub fn overlay_is_open(&self) -> bool {
+        self.overlay_open.load(Ordering::SeqCst)
+    }
+
     pub fn next_generation(&self) -> u64 {
         self.generation.fetch_add(1, Ordering::SeqCst) + 1
     }

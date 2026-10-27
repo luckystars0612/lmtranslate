@@ -329,7 +329,18 @@ the popup — is tens of milliseconds. So every lever is about generating less:
   ```
 
   A large `out=` relative to `chars=` means the model spent its time deliberating. A
-  smaller or non-reasoning model in **Settings → Model name** is the fix.
+  smaller or non-reasoning model in **Settings → Model** is the fix.
+
+- **For screenshots, use `MiniMax-M3`, not `MiniMax-M3.1-Flash`.** Flash always reasons
+  (the API refuses to switch it off) and over an image it reasons at length. Measured on
+  the same crop with the app's own prompt:
+
+  | | Screenshot | Text, ~150 characters |
+  |---|---|---|
+  | `MiniMax-M3` | **7 s** | 3.3 s |
+  | `MiniMax-M3.1-Flash` | 70 s, and ran out of tokens before answering | 3.1 s |
+
+  Flash is no faster on text either, so M3 is the better default for both flows.
 
 The next lever would be **streaming**, which would not reduce total time but would start
 showing the translation as it arrives. It is not implemented — it needs incremental
@@ -412,6 +423,12 @@ The crop overlay works from a frozen frame on Windows: every monitor is captured
 the overlay appears, shown inside it, and cropped from. A live overlay does not survive
 video — Chrome stops painting a page it considers covered, so a YouTube tab used to go
 blank under it. The other platforms still crop live.
+
+The overlay windows themselves are built once, a few seconds after startup, and then
+hidden and shown rather than closed. Building a WebView2 window and loading its page
+costs hundreds of milliseconds per monitor; with the windows ready, the overlay is on
+screen about 140 ms after `Alt+S`, most of it the capture. The log records the figure
+for every crop (`crop overlay on screen …ms after the hotkey`).
 
 On macOS the first run needs **Accessibility** (to send the copy chord) and **Screen
 Recording** (to capture) in System Settings → Privacy & Security. Settings → Advanced has

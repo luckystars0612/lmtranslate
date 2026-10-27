@@ -234,6 +234,7 @@ pub fn start_screenshot_flow(app: AppHandle) {
         return;
     }
     drop(state);
+    crop_overlay::begin_session();
 
     tauri::async_runtime::spawn_blocking(move || {
         // Nothing of ours may end up in the frozen frame, or sit above the overlay.
@@ -422,10 +423,10 @@ async fn screenshot_flow(
 async fn wait_for_overlays_to_vanish(app: &AppHandle) {
     let deadline = Instant::now() + OVERLAY_TEARDOWN_LIMIT;
     loop {
-        let still_open = app
-            .webview_windows()
-            .keys()
-            .any(|label| crop_overlay::is_overlay(label));
+        // The overlays are hidden, not closed, so "gone" means "no longer visible".
+        let still_open = app.webview_windows().iter().any(|(label, window)| {
+            crop_overlay::is_overlay(label) && window.is_visible().unwrap_or(false)
+        });
         if !still_open || Instant::now() >= deadline {
             break;
         }
