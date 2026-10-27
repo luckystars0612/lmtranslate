@@ -46,6 +46,7 @@ impl PlatformCapture for LinuxX11Capture {
             supports_text_selection: true,
             supports_screen_capture: true,
             supports_replace: true,
+            supports_selection_bubble: false,
             notes: vec![
                 "Highlighted text is read straight from the X11 PRIMARY selection, so no \
                  copy is simulated and the clipboard is left untouched."

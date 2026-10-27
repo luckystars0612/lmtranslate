@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Translate selection</title>
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/bubble.css" />
+  </head>
+  <body>
+    <main class="pill" id="pill">
+      <button class="act act--primary" id="translate" type="button" tabindex="-1">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <path
+            d="M2 3.5h6M5 2v1.5M3.2 3.5c.5 2 1.8 3.6 3.8 4.6M6.8 3.5C6.3 5.6 5 7.4 2.5 8.6M8.5 14l2.5-6 2.5 6M9.3 12.2h3.4"
+            stroke="currentColor"
+            stroke-width="1.3"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
+          />
+        </svg>
+        <span>Translate</span>
+      </button>
+      <span class="divider" aria-hidden="true"></span>
+      <button class="act" id="rewrite" type="button" tabindex="-1">Rewrite</button>
+    </main>
+    <script type="module" src="./bubble.ts"></script>
+  </body>
+</html>

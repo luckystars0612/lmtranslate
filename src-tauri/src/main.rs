@@ -9,6 +9,8 @@ mod flows;
 mod hotkeys;
 mod logger;
 mod platform;
+mod secrets;
+mod speech;
 mod state;
 mod translate;
 mod windows;
@@ -21,7 +23,7 @@ use tauri_plugin_autostart::MacosLauncher;
 use crate::config::Settings;
 use crate::logger::Logger;
 use crate::state::AppState;
-use crate::windows::settings_window;
+use crate::windows::{selection_bubble, settings_window};
 
 fn main() {
     tauri::Builder::default()
@@ -57,6 +59,19 @@ fn main() {
             commands::copy_text,
             commands::crop_commit,
             commands::crop_cancel,
+            commands::crop_frame,
+            commands::crop_ready,
+            commands::bubble_action,
+            commands::speak,
+            commands::stop_speaking,
+            commands::speech_offline_status,
+            commands::speech_offline_install,
+            commands::speech_offline_remove,
+            commands::list_speech_models,
+            commands::list_voices,
+            commands::list_azure_regions,
+            commands::list_models,
+            commands::bubble_hover,
             commands::get_log,
             commands::clear_log,
             commands::reveal_log,
@@ -86,13 +101,14 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         logger.info(format!("migrated settings from {}", from.display()));
     }
 
-    let settings = match config::load(&config_path) {
+    let mut settings = match config::load(&config_path) {
         Ok(settings) => settings,
         Err(e) => {
             logger.warn(format!("using default settings: {e}"));
             Settings::default()
         }
     };
+    secrets::hydrate(&config_path, &mut settings, &logger);
 
     // One platform backend, chosen once, from here on hidden behind the trait.
     let platform = platform::detect();
@@ -143,6 +159,10 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     commands::apply_autostart(&handle, settings.launch_on_login);
+
+    // Always watched where the backend can: the setting is checked per selection, so it
+    // can be switched on and off without a restart.
+    selection_bubble::start(&handle);
 
     // `lmtranslate --settings` opens Settings straight away, so the app can be given a
     // desktop shortcut that goes somewhere useful instead of only living in the tray.

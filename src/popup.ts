@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { SpeechPlayer, type PlayerState } from "./speech-player";
 
 /** Mirrors `windows::popup_window::PopupState` on the Rust side. */
 interface PopupState {
@@ -26,6 +27,7 @@ const card = el<HTMLElement>("card");
 const route = el<HTMLElement>("route");
 const lang = el<HTMLSelectElement>("lang");
 const gloss = el<HTMLElement>("gloss");
+const originalRow = el<HTMLElement>("originalRow");
 const original = el<HTMLParagraphElement>("original");
 const translated = el<HTMLParagraphElement>("translated");
 const err = el<HTMLElement>("err");
@@ -36,9 +38,16 @@ const foot = el<HTMLElement>("foot");
 const stat = el<HTMLElement>("stat");
 const copyBtn = el<HTMLButtonElement>("copy");
 const settingsBtn = el<HTMLButtonElement>("openSettings");
+const listenBtn = el<HTMLButtonElement>("listen");
+const listenLabel = el<HTMLElement>("listenLabel");
+const listenOriginalBtn = el<HTMLButtonElement>("listenOriginal");
 
 let current: PopupState | null = null;
 let copyResetTimer: number | undefined;
+/** What the footer says when nothing is being read. */
+let baseStat = "";
+/** Which side is being read, if any. */
+let reading: "translated" | "original" | null = null;
 
 function applyTheme(theme: PopupState["theme"]) {
   if (theme === "system") delete document.documentElement.dataset.theme;
@@ -65,6 +74,10 @@ function fillLanguages(languages: string[], selected: string) {
 }
 
 function render(s: PopupState) {
+  // A new translation (or a retranslation in progress) makes what is being read stale.
+  if (reading && (s.kind !== "result" || s.translated !== current?.translated)) {
+    player.stop();
+  }
   current = s;
   applyTheme(s.theme);
   fillLanguages(s.languages, s.targetLang);
@@ -95,7 +108,8 @@ function render(s: PopupState) {
     settingsBtn.hidden = true;
 
     original.textContent = s.original;
-    original.hidden = s.original.length === 0;
+    originalRow.hidden = s.original.length === 0;
+    listenOriginalBtn.hidden = s.kind !== "result";
 
     if (s.kind === "loading") {
       translated.textContent =
@@ -105,7 +119,11 @@ function render(s: PopupState) {
       translated.textContent = s.translated;
       foot.hidden = false;
       // A rewrite's outcome matters more than the character count.
-      stat.textContent = s.note || `${[...s.translated].length} CHARS`;
+      baseStat = s.note || `${[...s.translated].length} CHARS`;
+      if (!reading) {
+        stat.textContent = baseStat;
+        stat.style.color = "";
+      }
       resetCopyButton();
     }
   }
@@ -142,6 +160,54 @@ copyBtn.addEventListener("click", async () => {
     console.error(e);
   }
 });
+
+// ── Read aloud ─────────────────────────────────────────────────────────────
+
+const player = new SpeechPlayer((state: PlayerState) => {
+  const busy = state.phase === "loading" || state.phase === "playing";
+  if (!busy) reading = null;
+
+  listenBtn.dataset.reading = String(busy && reading === "translated");
+  listenOriginalBtn.dataset.reading = String(busy && reading === "original");
+  listenLabel.textContent = busy && reading === "translated" ? "Stop" : "Listen";
+
+  switch (state.phase) {
+    case "idle":
+      stat.textContent = baseStat;
+      stat.style.color = "";
+      break;
+    case "loading":
+      stat.textContent = "PREPARING VOICE…";
+      break;
+    case "playing":
+      stat.textContent = state.fallback
+        ? "READING OFFLINE — CLOUD VOICE FAILED"
+        : `READING · ${state.engine.toUpperCase()}`;
+      break;
+    case "error":
+      stat.textContent = state.message;
+      stat.style.color = "var(--danger)";
+      requestAnimationFrame(fitWindow);
+      break;
+  }
+});
+
+function readAloud(which: "translated" | "original") {
+  if (!current || current.kind !== "result") return;
+  if (reading === which && player.active) {
+    player.stop();
+    return;
+  }
+  stat.style.color = "";
+  reading = which;
+  // The translation's language is known; the original's is left to the voice.
+  const text = which === "translated" ? current.translated : current.original;
+  const lang = which === "translated" ? current.targetLang : null;
+  void player.play(text, lang);
+}
+
+listenBtn.addEventListener("click", () => readAloud("translated"));
+listenOriginalBtn.addEventListener("click", () => readAloud("original"));
 
 el<HTMLButtonElement>("close").addEventListener("click", () => void invoke("close_popup"));
 

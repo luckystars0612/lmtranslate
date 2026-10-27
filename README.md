@@ -32,6 +32,14 @@ releasing the drag *is* the trigger. All three hotkeys are configurable, and so 
 languages — `Alt+D` translates into your **target language**, `Alt+F` into your
 **rewrite language**.
 
+Two more ways in, for when the keyboard is not where your hands are:
+
+- **The selection bubble** (Windows). Drag across text or double-click a word and a small
+  *Translate | Rewrite* pill appears next to it. Clicking it does exactly what `Alt+D` or
+  `Alt+F` would. It goes away on the next click, and can be turned off in Settings.
+- **Read aloud.** Every popup has a **Listen** button for the translation and a small
+  speaker for the original. See [Read aloud](#read-aloud).
+
 It runs in the system tray with no main window, and behaves identically no matter which
 application is in the foreground — browser, native app, IDE, terminal, PDF viewer.
 
@@ -54,17 +62,51 @@ selection is replaced by natural English (or whatever you set **Rewrite into** t
   from injecting input into another. There the popup reports that and you can copy
   manually. Settings → Advanced always states whether this session supports it.
 
+### Read aloud
+
+The popup can read the translation — or the original — out loud. Pick the voice in
+**Settings → Voice**:
+
+| Voice | Languages | Needs |
+|---|---|---|
+| **MiniMax** (cloud) | 40, Vietnamese included | your MiniMax key — the translation key is reused, and speech draws on the same Token Plan quota |
+| **Azure AI Speech** (cloud) | 140+ | a Speech resource's key and region; the free F0 tier covers 500,000 characters a month |
+| **Offline voice** (Kokoro, on your CPU) | English and Chinese | a one-time download of about 390 MB, from Settings |
+
+- **Pick a voice per language.** The Voice row lists every voice the engine offers for a
+  language — MiniMax's and Azure's lists come from your account and region — and
+  **Preview** plays a sentence in that language with that voice. The popup uses the
+  voice picked for the language it is reading; a language with no pick gets a sensible
+  default.
+- **Fallback, both ways.** With *If the chosen voice can't read something, use the other
+  kind* on, a failing cloud voice hands over to the offline one, and the offline voice
+  hands a language it cannot speak to a configured cloud voice. A cloud voice with no
+  key is skipped, so a fresh install reads offline once the offline voice is downloaded.
+- **It starts talking quickly.** Text is cut into sentences and each one plays as soon as
+  it is ready — measured at about 0.8 s to the first audio over MiniMax. The offline voice
+  takes about three seconds to load the first time, and runs about five times faster
+  than real time on a recent desktop CPU.
+- **The offline voice is never bundled.** The download is the sherpa-onnx runtime plus the
+  Kokoro v1.1 model, both checked against pinned SHA-256 hashes before anything is
+  unpacked, and loaded only when used. It is unloaded again after ten idle minutes.
+  **Remove** in Settings deletes it.
+
 ### Features
 
 - **Works anywhere.** Nothing to install into the browser or the editor.
 - **Reads pixels, not just text.** The screenshot flow OCRs and translates in one call,
   so it handles text in images, video frames and canvases.
+- **Freezes the screen first** (Windows), the way `Win+Shift+S` does: the crop is taken
+  from a still frame, so video keeps its picture and a subtitle cannot change mid-drag.
 - **Bring your own model.** MiniMax over either of its two APIs, or any
-  OpenAI-compatible or Anthropic-compatible endpoint. Base URL and model name are
-  editable, so a model bump needs no rebuild.
+  OpenAI-compatible or Anthropic-compatible endpoint. The model is a dropdown — MiniMax's
+  current models, or whatever a generic endpoint's `/models` lists — with *Other model…*
+  for anything else, so a model bump needs no rebuild.
 - **Your clipboard is left alone.** It is saved before the copy step and restored after.
-- **Your key stays local.** Stored in a plain file next to the settings, never logged,
-  sent only to the endpoint you configured.
+- **Your keys are not in a file.** API keys live in the operating system's credential
+  store — Windows Credential Manager, the macOS Keychain, the Secret Service on Linux —
+  never in `settings.json`, never in the log, and are sent only to the endpoint you
+  configured.
 - **Instant repeats.** A per-session cache makes re-translating the same text free.
 - **Keyboard-first.** Every surface closes on `Esc`, and every control has a visible
   focus ring.
@@ -194,7 +236,7 @@ install scripts check for all of it and offer to fix what is missing.
 | **All platforms** | [Rust](https://rustup.rs) 1.85+, [Node](https://nodejs.org) 20+ |
 | **Windows** | Visual Studio Build Tools with the C++ workload; WebView2 runtime (preinstalled on Windows 11 and current Windows 10) |
 | **macOS** | Xcode command line tools |
-| **Linux** | `webkit2gtk-4.1`, `libayatana-appindicator3`, `librsvg2`, `libxdo`, `libssl-dev`, plus `xdg-desktop-portal` on Wayland. No PipeWire or XCB headers: both capture backends are pure Rust. |
+| **Linux** | `webkit2gtk-4.1`, `libayatana-appindicator3`, `librsvg2`, `libxdo`, `libssl-dev`, plus `xdg-desktop-portal` on Wayland. No PipeWire, XCB or D-Bus headers: both capture backends and the Secret Service client are pure Rust. |
 
 On Debian/Ubuntu:
 
@@ -224,14 +266,14 @@ Open **Settings** from the tray icon and fill in the Provider section:
 - **Provider** — defaults to *MiniMax (Anthropic API)*. See
   [Which API shape](#which-api-shape) for why.
 - **Base URL** — defaults to `https://api.minimax.io/anthropic`.
-- **Model name** — defaults to `MiniMax-M3`.
+- **Model** — defaults to `MiniMax-M3`; MiniMax also offers `MiniMax-M3.1-Flash`.
 - **API key** — masked. **Test connection** does a cheap round trip and reports pass or
   fail inline instead of saving silently.
 
 **Target language** (what `Alt+D` translates into), **Rewrite into** (what `Alt+F`
 replaces your selection with, default English), all three hotkeys, whether a rewrite shows
-a popup at all, launch-on-login, popup auto-close and theme are optional and persist
-across restarts.
+a popup at all, the selection bubble, the read-aloud voice, launch-on-login, popup
+auto-close and theme are optional and persist across restarts.
 
 ### Where your files live
 
@@ -243,11 +285,19 @@ One folder, named after the app:
 | macOS | `~/Library/Application Support/LMTranslate/` |
 | Linux | `~/.config/LMTranslate/` |
 
-containing `settings.json` and `logs/lmtranslate.log`. Tauri's `app_config_dir()` would
-have appended the whole reverse-DNS bundle identifier here, putting vendor branding into
-a path you have to read; the app resolves its own folder instead. Settings written by a
-build that used an older identifier are migrated forward on first run, so upgrading does
-not cost you the API key.
+containing `settings.json`, `logs/lmtranslate.log` and, once downloaded, the offline
+voice under `voices/`. Tauri's `app_config_dir()` would have appended the whole
+reverse-DNS bundle identifier here, putting vendor branding into a path you have to
+read; the app resolves its own folder instead. Settings written by a build that used an
+older identifier are migrated forward on first run, so upgrading does not cost you the
+API key.
+
+The API keys are **not** in that folder. Each one is an entry under the service name
+`LMTranslate` in the system's credential store (on Windows, `cmdkey /list | findstr
+LMTranslate` shows them). A `settings.json` that still holds a key — written by 0.1.2 or
+earlier, or edited by hand — has it moved into the store and the file rewritten on the
+next start. On a Linux desktop without GNOME Keyring or KWallet there is no store to use,
+and the keys stay in the file as before; Settings says which applies.
 
 Both paths are shown at the bottom of **Settings → Advanced**, where the log can be
 viewed and cleared. The log holds request and response *metadata* only — never the API
@@ -346,8 +396,22 @@ moving focus off the selection. The chord's own modifier is therefore pressed *f
 which makes the `Alt` release non-lone and satisfies both constraints. The same ordering
 is what makes `Alt+F`'s paste land.
 
+`Alt` has a second trap. The OS swallows the hotkey's letter but not its modifier, so the
+application sees `Alt` go down and, if you let go quickly, come straight back up — a lone
+`Alt` tap, which makes Chrome and Edge focus their menu button. The copy then lands on a
+menu and the popup says "No text selected" with the text plainly highlighted. On Windows
+the app taps an unassigned key (the one AutoHotkey uses for the same job) the instant the
+hotkey fires, while `Alt` is still held, so the release is never lone.
+
 The rewrite flow also never lets the popup take focus, since `Ctrl+V` has to reach your
-application rather than ours.
+application rather than ours. And when our own popup or the selection bubble *does* have
+focus at the moment of a copy, focus is handed back to the application the selection
+came from first, rather than leaving it to Windows to pick the next window.
+
+The crop overlay works from a frozen frame on Windows: every monitor is captured before
+the overlay appears, shown inside it, and cropped from. A live overlay does not survive
+video — Chrome stops painting a page it considers covered, so a YouTube tab used to go
+blank under it. The other platforms still crop live.
 
 On macOS the first run needs **Accessibility** (to send the copy chord) and **Screen
 Recording** (to capture) in System Settings → Privacy & Security. Settings → Advanced has
@@ -364,10 +428,12 @@ from `XDG_SESSION_TYPE`, falling back to `WAYLAND_DISPLAY`.
 ### Project layout
 
 ```
-src/                          frontend — three small documents, no framework
+src/                          frontend — four small documents, no framework
   popup.{html,ts}             the only result window (loading / result / error)
   crop-overlay.{html,ts}      fullscreen drag-to-select, one per monitor
+  bubble.{html,ts}            the Translate | Rewrite pill next to a mouse selection
   settings.{html,ts}          single-column grouped settings
+  speech-player.ts            plays read-aloud clips back to back (popup and Settings)
   styles/tokens.css           design tokens and the gloss rail
 
 src-tauri/src/
@@ -376,11 +442,16 @@ src-tauri/src/
   flows.rs                    end-to-end orchestration for both triggers
   commands.rs                 everything the webviews can call
   config.rs  state.rs  logger.rs  demo.rs
+  secrets.rs                  API keys in and out of the system credential store
   platform/                   one backend per platform behind PlatformCapture
+                              (Windows also: focus hand-back, mouse hook)
   capture/                    text_selection.rs, screenshot.rs
   translate/                  provider.rs (trait), client.rs (OpenAI shape),
                               anthropic.rs (Messages shape), prompts.rs, cache.rs
-  windows/                    popup_window.rs, crop_overlay.rs, settings_window.rs
+  speech/                     read-aloud: minimax.rs, azure.rs, local.rs (Kokoro via
+                              sherpa-onnx, loaded at runtime), voices.rs
+  windows/                    popup_window.rs, crop_overlay.rs, selection_bubble.rs,
+                              settings_window.rs
 ```
 
 [DESIGN.md](DESIGN.md) documents the interface design — the palette, the type system and
@@ -397,7 +468,8 @@ produces the platform icon set. `scripts/install.{sh,ps1}` are the installers an
 
 ```sh
 cd src-tauri && cargo test    # model-reply parsing, reasoning stripping, endpoint
-                              # construction, cache eviction, prompt substitution
+                              # construction, cache eviction, prompt substitution,
+                              # sentence splitting, voice choice, keys kept off disk
 npm run build                 # strict TypeScript typecheck + production bundle
 ```
 
@@ -423,14 +495,20 @@ artifacts, so a tag that disagrees with them publishes mislabelled files.
 
 Stated plainly rather than discovered later:
 
-- **No live API call has been verified.** The transports, prompts and token accounting
-  are implemented and unit-tested against recorded response shapes, but no request has
-  been made to a real endpoint. The Anthropic path's URL layout and auth headers are
-  inferred from that contract.
 - **Only the Windows build has been run.** CI compiles all three platforms and `cargo test`
   passes on each, so the macOS and Linux binaries do build and link — but nobody has
-  launched them. The hotkeys, both capture backends and the paste-back are verified on
-  Windows only.
+  launched them. The hotkeys, both capture backends, the paste-back, read aloud and the
+  credential store are verified on Windows only; the offline voice's library loading
+  and the Keychain / Secret Service paths have never run on macOS or Linux.
+- **Windows-only for now:** the selection bubble (it needs a global mouse hook) and the
+  frozen-frame crop. The other platforms keep the hotkeys and crop live.
+- **The selection bubble guesses.** It reacts to a drag or a double-click, and cannot tell
+  a text selection from, say, dragging a scrollbar. Title bars, window borders, the
+  desktop and the taskbar are filtered out; anything else may get a bubble that the next
+  click dismisses.
+- **The offline voice speaks English and Chinese only**, and its model is downloaded from
+  sherpa-onnx's GitHub releases. If upstream ever re-uploads that file, its hash will no
+  longer match and the download will refuse to install until the pinned hash is updated.
 - **The Wayland backends are the least exercised code here** — the portal capture and the
   primary-selection read have never run against GNOME or KDE. The X11 `GetImage` decode is
   separately verified against a real X server, with colours round-tripping byte-exact.
@@ -439,5 +517,6 @@ Stated plainly rather than discovered later:
   no-release-published path and the releases-API parsing. Their macOS branch and the
   `rpm`/AppImage install paths have not been executed.
 - **Nothing is code-signed**, so downloads trip Gatekeeper and SmartScreen (see above).
-- **Milestone 8 — hotkey-free selection detection** (UI Automation, AXUIElement, AT-SPI)
-  is not implemented; the hotkey remains the trigger on every platform.
+- **Milestone 8 — hotkey-free selection detection** through the accessibility APIs (UI
+  Automation, AXUIElement, AT-SPI) is not implemented. The Windows selection bubble is a
+  mouse-gesture heuristic standing in for it.

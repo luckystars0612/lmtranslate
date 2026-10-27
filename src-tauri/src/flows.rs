@@ -13,8 +13,9 @@ use crate::config::{Settings, REQUEST_TIMEOUT_SECS};
 use crate::platform::CaptureError;
 use crate::state::AppState;
 use crate::translate::types::{InputKind, ProviderError, TranslateRequest};
+use crate::windows::crop_overlay::{self, FrozenFrame};
 use crate::windows::popup_window::{self, Anchor, PopupState};
-use crate::windows::crop_overlay;
+use crate::windows::{selection_bubble, settings_window};
 
 /// Slack on top of the HTTP client's own timeout, so the client reports first.
 const OVERALL_TIMEOUT_SECS: u64 = REQUEST_TIMEOUT_SECS + 5;
@@ -63,12 +64,11 @@ pub fn start_text_flow(app: AppHandle, mode: TextMode) {
 }
 
 async fn text_flow(app: AppHandle, generation: u64, settings: Settings, mode: TextMode) {
-    // A popup left over from an earlier translation may still hold focus, and the
-    // synthetic Ctrl+C has to reach the user's application rather than us.
+    // The synthetic Ctrl+C has to reach the user's application rather than us.
     {
         let app = app.clone();
         let _ = tauri::async_runtime::spawn_blocking(move || {
-            popup_window::close_and_settle(&app);
+            focus_selection_owner(&app);
         })
         .await;
     }
@@ -150,6 +150,53 @@ async fn text_flow(app: AppHandle, generation: u64, settings: Settings, mode: Te
     .await;
 }
 
+/// Makes sure the application holding the selection has keyboard focus.
+///
+/// Usually it already does. It does not when a popup from the previous translation was
+/// still focused — closing it leaves Windows to pick what gets activated next, and that
+/// is not reliably the window underneath — or when the press came from a click on the
+/// selection bubble. Either way the selection is still there, just not focused, and the
+/// copy came back empty: "No text selected" with the text visibly highlighted.
+fn focus_selection_owner(app: &AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+
+    selection_bubble::hide(app);
+
+    let foreground = state.platform.foreground_window();
+    if let Some(window) = foreground {
+        if let Ok(mut slot) = state.target_window.lock() {
+            *slot = Some(window);
+        }
+    }
+
+    // A previous popup may still hold focus.
+    popup_window::close_and_settle(app);
+
+    if foreground.is_some() {
+        return;
+    }
+    // One of our windows had focus. Settings is the exception: text selected inside it
+    // is what the user means, and focus is already in the right place.
+    let in_settings = app
+        .get_webview_window(settings_window::LABEL)
+        .and_then(|window| window.is_focused().ok())
+        .unwrap_or(false);
+    if in_settings {
+        return;
+    }
+
+    let target = state.target_window.lock().ok().and_then(|slot| *slot);
+    if let Some(target) = target {
+        if !state.platform.activate_window(target) {
+            state
+                .logger
+                .warn("could not give focus back to the application with the selection");
+        }
+    }
+}
+
 // ── Flow 2: screenshot and translate ───────────────────────────────────────
 
 pub fn start_screenshot_flow(app: AppHandle) {
@@ -188,26 +235,46 @@ pub fn start_screenshot_flow(app: AppHandle) {
     }
     drop(state);
 
-    let handle = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        // The overlay must be the topmost thing on screen.
-        popup_window::close(&handle);
+    tauri::async_runtime::spawn_blocking(move || {
+        // Nothing of ours may end up in the frozen frame, or sit above the overlay.
+        selection_bubble::hide_and_settle(&app);
+        popup_window::close_and_settle(&app);
 
-        match crop_overlay::open_all(&handle) {
+        let started = Instant::now();
+        let frames = crop_overlay::freeze_all(&app);
+        if !frames.is_empty() {
+            log_info(
+                &app,
+                &format!(
+                    "froze {} monitor(s) in {}ms",
+                    frames.len(),
+                    started.elapsed().as_millis()
+                ),
+            );
+        }
+        if let Some(state) = app.try_state::<AppState>() {
+            if let Ok(mut slot) = state.frozen_frames.lock() {
+                *slot = frames;
+            }
+        }
+
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || match crop_overlay::open_all(&handle) {
             Ok(0) | Err(_) => {
                 log_error(&handle, "could not open the crop overlay on any monitor");
-                if let Some(state) = handle.try_state::<AppState>() {
-                    state.end_overlay();
-                }
+                cancel_crop(handle.clone());
             }
             Ok(count) => log_info(&handle, &format!("crop overlay open on {count} monitor(s)")),
-        }
+        });
     });
 }
 
 pub fn cancel_crop(app: AppHandle) {
     crop_overlay::close_all(&app);
     if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut frames) = state.frozen_frames.lock() {
+            frames.clear();
+        }
         state.end_overlay();
     }
 }
@@ -237,6 +304,13 @@ pub fn handle_crop(app: AppHandle, label: String, x: f64, y: f64, width: f64, he
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
+    // Every frame is dropped here; only the one the drag was made on is kept.
+    let frozen = state
+        .frozen_frames
+        .lock()
+        .ok()
+        .and_then(|mut frames| frames.drain().find(|(key, _)| *key == label))
+        .map(|(_, frame)| frame);
     state.end_overlay();
 
     if !state.begin_flight() {
@@ -256,6 +330,7 @@ pub fn handle_crop(app: AppHandle, label: String, x: f64, y: f64, width: f64, he
             physical_w,
             physical_h,
         ),
+        frozen,
     ));
 }
 
@@ -264,18 +339,25 @@ async fn screenshot_flow(
     generation: u64,
     settings: Settings,
     region: (i32, i32, u32, u32),
+    frozen: Option<FrozenFrame>,
 ) {
     let (x, y, width, height) = region;
 
-    // Capture happens *before* the popup opens. The popup would otherwise be on
-    // screen while the shot is taken and could end up inside it.
-    wait_for_overlays_to_vanish(&app).await;
+    // A live capture happens *before* the popup opens. The popup would otherwise be on
+    // screen while the shot is taken and could end up inside it. A frozen frame was
+    // taken before anything of ours was on screen, so it has nothing to wait for.
+    if frozen.is_none() {
+        wait_for_overlays_to_vanish(&app).await;
+    }
 
     let captured = {
         let app = app.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            let state = app.state::<AppState>();
-            capture::screenshot::capture_region(state.platform.as_ref(), x, y, width, height)
+        tauri::async_runtime::spawn_blocking(move || match frozen {
+            Some(frame) => capture::screenshot::crop_frozen(&frame, x, y, width, height),
+            None => {
+                let state = app.state::<AppState>();
+                capture::screenshot::capture_region(state.platform.as_ref(), x, y, width, height)
+            }
         })
         .await
     };

@@ -17,7 +17,11 @@ const SENTINEL: &str = "\u{2063}lmtranslate\u{2063}";
 /// The plan suggests a flat 80-120ms wait. Polling instead is strictly better: it
 /// returns as soon as the target app has written the clipboard (usually well under
 /// 80ms) and it can tell an empty selection apart from a slow one.
-const COPY_TIMEOUT: Duration = Duration::from_millis(600);
+///
+/// One wait per attempt. The second attempt exists because the first chord is
+/// occasionally swallowed by an application that has only just been handed focus back,
+/// which used to surface as "No text selected" with the text plainly highlighted.
+const COPY_ATTEMPTS: [Duration; 2] = [Duration::from_millis(600), Duration::from_millis(350)];
 const POLL_INTERVAL: Duration = Duration::from_millis(15);
 
 /// Time given to the foreground app to process the modifier key-ups below before the
@@ -42,20 +46,25 @@ pub fn simulate_copy_and_read(modifier: Key) -> Result<String, CaptureError> {
         .set_text(SENTINEL)
         .map_err(|e| CaptureError::Backend(format!("could not stage the clipboard: {e}")))?;
 
-    if let Err(e) = send_chord(modifier, 'c') {
-        restore_clipboard(saved);
-        return Err(e);
-    }
-
-    let deadline = Instant::now() + COPY_TIMEOUT;
     let mut copied: Option<String> = None;
-    while Instant::now() < deadline {
-        std::thread::sleep(POLL_INTERVAL);
-        if let Ok(text) = clipboard.get_text() {
-            if text != SENTINEL {
-                copied = Some(text);
-                break;
+    for wait in COPY_ATTEMPTS {
+        if let Err(e) = send_chord(modifier, 'c') {
+            restore_clipboard(saved);
+            return Err(e);
+        }
+
+        let deadline = Instant::now() + wait;
+        while Instant::now() < deadline {
+            std::thread::sleep(POLL_INTERVAL);
+            if let Ok(text) = clipboard.get_text() {
+                if text != SENTINEL {
+                    copied = Some(text);
+                    break;
+                }
             }
+        }
+        if copied.is_some() {
+            break;
         }
     }
 
@@ -245,6 +254,29 @@ pub fn capture_region_xcap(
     encode_png(downscale(image))
 }
 
+/// A whole monitor through `xcap`, for the crop overlay's frozen frame.
+///
+/// Windows only for now: on macOS xcap reports monitor bounds in points while the
+/// overlay works in physical pixels, and that mapping has not been verified there.
+#[cfg(target_os = "windows")]
+pub fn capture_frame_xcap(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<image::RgbaImage, CaptureError> {
+    let centre_x = x + (width / 2) as i32;
+    let centre_y = y + (height / 2) as i32;
+
+    let monitor = xcap::Monitor::from_point(centre_x, centre_y).map_err(|e| {
+        CaptureError::Backend(format!("no monitor contains {centre_x},{centre_y}: {e}"))
+    })?;
+
+    monitor
+        .capture_image()
+        .map_err(|e| CaptureError::Backend(format!("screen capture failed: {e}")))
+}
+
 /// Keeps the base64 payload sane for large crops.
 pub fn downscale(image: image::RgbaImage) -> image::RgbaImage {
     let (w, h) = (image.width(), image.height());
@@ -261,6 +293,23 @@ pub fn downscale(image: image::RgbaImage) -> image::RgbaImage {
         target_h,
         image::imageops::FilterType::CatmullRom,
     )
+}
+
+/// PNG tuned for speed over size: the frozen frame is only ever shown locally, and it
+/// sits between the hotkey and the overlay appearing.
+pub fn encode_png_fast(image: &image::RgbaImage) -> Result<Vec<u8>, CaptureError> {
+    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+
+    let mut out = Vec::new();
+    PngEncoder::new_with_quality(&mut out, CompressionType::Fast, FilterType::Sub)
+        .write_image(
+            image.as_raw(),
+            image.width(),
+            image.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .map_err(|e| CaptureError::Backend(format!("could not encode the frame: {e}")))?;
+    Ok(out)
 }
 
 pub fn encode_png(image: image::RgbaImage) -> Result<Vec<u8>, CaptureError> {

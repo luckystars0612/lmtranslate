@@ -91,6 +91,29 @@ void listen("crop:dismiss", () => {
   settled = true;
 });
 
+// Rust captured the screen before this window existed, and keeps the window hidden
+// until it is told the frame is painted, so the user never sees the live screen flash
+// through first. With no frame (or a failure) the overlay simply crops live.
+const frame = document.getElementById("frame") as HTMLImageElement;
+
+async function showFrame() {
+  try {
+    const png = await invoke<ArrayBuffer>("crop_frame");
+    if (png && png.byteLength > 0) {
+      const url = URL.createObjectURL(new Blob([png], { type: "image/png" }));
+      frame.src = url;
+      // A hidden window may hold off decoding until it is shown; do not wait on that.
+      await Promise.race([frame.decode(), new Promise((done) => setTimeout(done, 400))]);
+      frame.hidden = false;
+    }
+  } catch {
+    frame.hidden = true;
+  }
+  void invoke("crop_ready");
+}
+
+void showFrame();
+
 void invoke<string>("app_theme")
   .then((theme) => {
     if (theme === "light" || theme === "dark") {

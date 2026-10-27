@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -6,11 +7,14 @@ use tauri_plugin_global_shortcut::Shortcut;
 
 use crate::config::Settings;
 use crate::logger::Logger;
-use crate::platform::PlatformCapture;
+use crate::platform::{PlatformCapture, WindowHandle};
+use crate::speech::SpeechState;
 use crate::translate::cache::TranslationCache;
 use crate::translate::provider::TranslateProvider;
 use crate::translate::types::InputKind;
+use crate::windows::crop_overlay::FrozenFrame;
 use crate::windows::popup_window::{Anchor, PopupState};
+use crate::windows::selection_bubble::BubbleState;
 
 #[derive(Default)]
 pub struct RegisteredHotkeys {
@@ -35,6 +39,14 @@ pub struct AppState {
     pub last_input: Mutex<Option<InputKind>>,
     /// Text translations from this session, so a repeat is instant.
     pub cache: Mutex<TranslationCache>,
+    /// The application the last selection came from. When our own popup or bubble
+    /// has taken focus by the time the next copy goes out, focus is handed back here
+    /// first — otherwise the Ctrl+C would land on us.
+    pub target_window: Mutex<Option<WindowHandle>>,
+    /// The screen as it was when the crop hotkey was pressed, per overlay label.
+    pub frozen_frames: Mutex<HashMap<String, FrozenFrame>>,
+    pub bubble: BubbleState,
+    pub speech: SpeechState,
 
     /// Debounce: one translation in flight at a time.
     in_flight: AtomicBool,
@@ -67,6 +79,10 @@ impl AppState {
             popup_anchor: Mutex::new(None),
             last_input: Mutex::new(None),
             cache: Mutex::new(TranslationCache::default()),
+            target_window: Mutex::new(None),
+            frozen_frames: Mutex::new(HashMap::new()),
+            bubble: BubbleState::default(),
+            speech: SpeechState::default(),
             in_flight: AtomicBool::new(false),
             overlay_open: AtomicBool::new(false),
             generation: AtomicU64::new(0),

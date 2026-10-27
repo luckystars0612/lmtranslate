@@ -114,6 +114,7 @@ impl PlatformCapture for LinuxWaylandCapture {
             supports_text_selection: true,
             supports_screen_capture: true,
             supports_replace: false,
+            supports_selection_bubble: false,
             notes: vec![
                 "Wayland forbids synthetic keystrokes, so highlighted text is read from \
                  the primary selection instead. Compositors that do not implement it \

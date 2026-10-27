@@ -56,8 +56,20 @@ body {
   flex-wrap: wrap;
 }
 
-.inline > input {
+.inline > input,
+.inline > select {
   flex: 1 1 200px;
+}
+
+/* The voice picker's language box only needs room for a language name. */
+.inline > #voiceLang {
+  flex: 0 1 140px;
+}
+
+/* Voice labels are long; let the box shrink so Preview stays on the same line. */
+.inline > #voiceSelect {
+  flex: 1 1 120px;
+  min-width: 0;
 }
 
 input[type="text"],

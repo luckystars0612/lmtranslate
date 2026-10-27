@@ -103,6 +103,9 @@ pub fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, state: ShortcutState) {
         return;
     };
 
+    // First, while the user is still holding the modifier — see the Windows backend.
+    app_state.platform.mask_hotkey_modifiers();
+
     let slot = {
         let Ok(registered) = app_state.hotkeys.lock() else {
             return;

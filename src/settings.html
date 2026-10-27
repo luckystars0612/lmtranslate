@@ -23,8 +23,22 @@
         </div>
 
         <div class="row">
-          <label for="model">Model name</label>
-          <input id="model" type="text" spellcheck="false" autocomplete="off" />
+          <label for="modelSelect">Model</label>
+          <div class="field-stack">
+            <div class="inline">
+              <select id="modelSelect"></select>
+              <button class="btn" id="refreshModels" type="button" hidden>Refresh</button>
+            </div>
+            <input
+              id="model"
+              type="text"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="Model name"
+              hidden
+            />
+            <p class="status" id="modelStatus" hidden></p>
+          </div>
         </div>
 
         <div class="row">
@@ -44,9 +58,8 @@
               <button class="btn" id="testConn" type="button">Test connection</button>
             </div>
             <p class="status" id="connStatus" hidden></p>
-            <p class="note">
-              Stored locally in your config file. Never logged, and only ever sent to the
-              Base URL above.
+            <p class="note" id="keyNote">
+              Never logged, and only ever sent to the Base URL above.
             </p>
           </div>
         </div>
@@ -148,6 +161,20 @@
         </div>
 
         <div class="row">
+          <label for="selectionBubble">Selection</label>
+          <div class="field-stack">
+            <label class="check">
+              <input id="selectionBubble" type="checkbox" />
+              <span>Offer a translate button next to text I select with the mouse</span>
+            </label>
+            <p class="note" id="selectionBubbleNote">
+              Drag across text or double-click a word and a small bubble appears — click
+              it instead of pressing the hotkey. It goes away on the next click.
+            </p>
+          </div>
+        </div>
+
+        <div class="row">
           <label for="theme">Theme</label>
           <select id="theme">
             <option value="system">Match system</option>
@@ -162,6 +189,100 @@
             <input id="launchOnLogin" type="checkbox" />
             <span>Launch LM Translate when I log in</span>
           </label>
+        </div>
+      </section>
+
+      <!-- Voice ---------------------------------------------------------- -->
+      <section class="group">
+        <h2 class="group-title meta">Voice</h2>
+
+        <div class="row">
+          <label for="speechProvider">Read aloud with</label>
+          <div class="field-stack">
+            <select id="speechProvider">
+              <option value="minimax">MiniMax (cloud)</option>
+              <option value="azure">Azure AI Speech (cloud)</option>
+              <option value="local">Offline voice (Kokoro, on this PC)</option>
+            </select>
+            <p class="note">
+              The speaker button in the popup reads the translation (or the original) with
+              this voice. A cloud voice with no key is skipped, so the offline voice takes
+              over once it is downloaded.
+            </p>
+          </div>
+        </div>
+
+        <div class="row" data-voice="minimax">
+          <label for="speechModel">MiniMax model</label>
+          <select id="speechModel"></select>
+        </div>
+
+        <div class="row" data-voice="minimax">
+          <label for="speechMinimaxKey">MiniMax key</label>
+          <div class="field-stack">
+            <input
+              id="speechMinimaxKey"
+              type="password"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="Same as the translation key"
+            />
+            <p class="note">
+              Leave empty to use the MiniMax key from Provider. Speech draws on the same
+              Token Plan quota as translation.
+            </p>
+          </div>
+        </div>
+
+        <div class="row" data-voice="azure">
+          <label for="azureKey">Azure key</label>
+          <input id="azureKey" type="password" spellcheck="false" autocomplete="off" />
+        </div>
+
+        <div class="row" data-voice="azure">
+          <label for="azureRegion">Azure region</label>
+          <div class="field-stack">
+            <select id="azureRegion"></select>
+            <p class="note">
+              The region your Speech resource was created in (its Keys and Endpoint page
+              shows it). The free F0 tier covers 500,000 characters a month.
+            </p>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="voiceSelect">Voice</label>
+          <div class="field-stack">
+            <div class="inline">
+              <select id="voiceLang" aria-label="Language" title="Language"></select>
+              <select id="voiceSelect" aria-label="Voice"></select>
+              <button class="btn" id="testVoice" type="button">Preview</button>
+            </div>
+            <p class="status" id="voiceStatus" hidden></p>
+            <p class="note">
+              Pick a voice per language — the popup uses the one for the language it is
+              reading. Preview plays a sentence in that language with that voice.
+            </p>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="speechOfflineFallback">Offline voice</label>
+          <div class="field-stack">
+            <label class="check">
+              <input id="speechFallback" type="checkbox" />
+              <span>If the chosen voice can't read something, use the other kind</span>
+            </label>
+            <div class="inline">
+              <button class="btn" id="offlineAction" type="button">Download</button>
+            </div>
+            <p class="status" id="offlineStatus"></p>
+            <p class="note">
+              Kokoro, run on your CPU. English and Chinese only; other languages need a cloud
+              voice. With the option above, a cloud voice backs up the offline one and the
+              offline one backs up a cloud voice.
+            </p>
+          </div>
         </div>
       </section>
 

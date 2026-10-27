@@ -33,6 +33,7 @@ impl PlatformCapture for MacosCapture {
             supports_text_selection: true,
             supports_screen_capture: true,
             supports_replace: true,
+            supports_selection_bubble: false,
             notes: vec![
                 "Sending Cmd+C needs the Accessibility permission; capture needs Screen \
                  Recording. Grant both in System Settings > Privacy & Security."

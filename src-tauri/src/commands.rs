@@ -7,9 +7,11 @@ use crate::config::{self, ProviderConfig, ProviderMeta, Settings};
 use crate::flows;
 use crate::hotkeys::{self, Slot};
 use crate::platform::{common, PlatformCapabilities};
+use crate::secrets;
+use crate::speech;
 use crate::state::AppState;
 use crate::translate::{self, types::ProviderError};
-use crate::windows::{popup_window, settings_window};
+use crate::windows::{crop_overlay, popup_window, selection_bubble, settings_window};
 
 /// A pass/fail/warn result with a sentence the user can act on.
 #[derive(Debug, Serialize)]
@@ -48,6 +50,8 @@ pub struct PlatformReport {
     capabilities: PlatformCapabilities,
     config_path: String,
     log_path: String,
+    /// Where the API keys are kept, e.g. "Windows Credential Manager".
+    key_storage: String,
 }
 
 // ── Settings ───────────────────────────────────────────────────────────────
@@ -60,6 +64,31 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 #[tauri::command]
 pub fn list_providers() -> Vec<ProviderMeta> {
     config::PROVIDERS.to_vec()
+}
+
+/// The translation models to offer for a provider. The key and Base URL come from the
+/// form rather than saved settings, so the list follows what is being typed.
+#[tauri::command]
+pub async fn list_models(
+    provider: String,
+    base_url: String,
+    api_key: String,
+) -> Result<Vec<String>, String> {
+    let meta = config::provider_meta(&provider);
+    translate::list_models(
+        meta,
+        ProviderConfig {
+            api_key,
+            base_url: fallback(&base_url, meta.default_base_url),
+            model: String::new(),
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+pub fn list_speech_models() -> Vec<String> {
+    config::SPEECH_MODELS.iter().map(|s| s.to_string()).collect()
 }
 
 #[tauri::command]
@@ -114,9 +143,16 @@ pub fn save_settings(
     }
 
     apply_autostart(&app, settings.launch_on_login);
+    if !settings.selection_bubble {
+        selection_bubble::hide(&app);
+    }
+
     state.logger.info(format!(
-        "settings saved (provider={}, target={}, autoClose={}ms)",
-        settings.provider, settings.target_lang, settings.popup_auto_close_ms
+        "settings saved (provider={}, target={}, autoClose={}ms, bubble={})",
+        settings.provider,
+        settings.target_lang,
+        settings.popup_auto_close_ms,
+        settings.selection_bubble
     ));
 
     Ok(settings)
@@ -224,6 +260,7 @@ pub fn platform_report(state: State<'_, AppState>) -> PlatformReport {
         capabilities: state.platform.capabilities(),
         config_path: state.config_path.display().to_string(),
         log_path: state.logger.path().display().to_string(),
+        key_storage: secrets::storage_name().to_string(),
     }
 }
 
@@ -291,6 +328,87 @@ pub fn crop_commit(
 #[tauri::command]
 pub fn crop_cancel(app: AppHandle) {
     flows::cancel_crop(app);
+}
+
+/// The frozen screen behind this overlay as PNG bytes, or nothing when it crops live.
+/// Raw bytes rather than JSON: a 4K frame would otherwise be serialised number by number.
+#[tauri::command]
+pub fn crop_frame(app: AppHandle, window: tauri::WebviewWindow) -> tauri::ipc::Response {
+    tauri::ipc::Response::new(crop_overlay::take_frame_png(&app, window.label()))
+}
+
+/// The overlay has its frame painted and can be shown.
+#[tauri::command]
+pub fn crop_ready(app: AppHandle, window: tauri::WebviewWindow) {
+    crop_overlay::reveal(&app, &window);
+}
+
+// ── Read aloud ─────────────────────────────────────────────────────────────
+
+/// Reads `text` aloud, sending clips through `on_event` as they are ready. `lang` is
+/// one of the app's language names, or null to let the voice work it out.
+#[tauri::command]
+pub fn speak(
+    app: AppHandle,
+    text: String,
+    lang: Option<String>,
+    preview: Option<speech::Preview>,
+    on_event: tauri::ipc::Channel<speech::SpeechEvent>,
+) -> Result<(), String> {
+    speech::speak(app, text, lang, preview, on_event)
+}
+
+#[tauri::command]
+pub async fn list_voices(
+    app: AppHandle,
+    engine: String,
+    lang: String,
+) -> Result<speech::VoiceList, String> {
+    speech::list_voices(&app, &engine, &lang).await
+}
+
+#[tauri::command]
+pub fn list_azure_regions() -> Vec<speech::VoiceOption> {
+    speech::azure::REGIONS
+        .iter()
+        .map(|(id, label)| speech::VoiceOption {
+            id: id.to_string(),
+            label: label.to_string(),
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn stop_speaking(state: State<'_, AppState>) {
+    state.speech.cancel();
+}
+
+#[tauri::command]
+pub fn speech_offline_status(app: AppHandle) -> speech::local::OfflineStatus {
+    speech::local::status(&app)
+}
+
+#[tauri::command]
+pub async fn speech_offline_install(app: AppHandle) -> Result<(), String> {
+    speech::local::install(app).await
+}
+
+#[tauri::command]
+pub fn speech_offline_remove(app: AppHandle) -> Result<(), String> {
+    speech::local::remove(&app)
+}
+
+// ── Selection bubble ───────────────────────────────────────────────────────
+
+/// "translate" | "rewrite"
+#[tauri::command]
+pub fn bubble_action(app: AppHandle, action: String) {
+    selection_bubble::act(&app, &action);
+}
+
+#[tauri::command]
+pub fn bubble_hover(app: AppHandle, inside: bool) {
+    selection_bubble::hover(&app, inside);
 }
 
 // ── Debug log ──────────────────────────────────────────────────────────────

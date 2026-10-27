@@ -9,6 +9,16 @@ body {
   user-select: none;
 }
 
+/* The screen as it was when the hotkey was pressed. Its pixels are the monitor's
+   physical pixels, so filling the viewport maps them 1:1 at any scale factor. */
+.frame {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+}
+
 /* Full-screen dim, present until a drag starts. */
 .scrim {
   position: fixed;

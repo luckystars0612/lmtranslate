@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for the popup, the crop overlays and the settings window. Everything privileged (clipboard, capture, hotkeys, HTTP) happens in Rust, so the webviews only need events and basic window control.",
-  "windows": ["popup", "settings", "crop-*"],
+  "description": "Permissions for the popup, the crop overlays, the selection bubble and the settings window. Everything privileged (clipboard, capture, hotkeys, HTTP) happens in Rust, so the webviews only need events and basic window control.",
+  "windows": ["popup", "settings", "crop-*", "bubble"],
   "permissions": ["core:default", "core:window:allow-start-dragging"]
 }

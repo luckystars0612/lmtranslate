@@ -1,5 +1,6 @@
 //! Settings load/save. A plain JSON file in the OS config dir — no plugin, so the
-//! shape stays entirely ours and is easy to hand-edit when debugging.
+//! shape stays entirely ours and is easy to hand-edit when debugging. The API keys are
+//! the exception: they live in the system keychain (`secrets`), not in the file.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -14,6 +15,12 @@ pub const DEFAULT_TARGET_LANG: &str = "Vietnamese";
 /// The rewrite direction: you have written something in your own language and want the
 /// selection replaced by this language instead.
 pub const DEFAULT_REPLACE_LANG: &str = "English";
+
+pub const SPEECH_PROVIDERS: &[&str] = &["minimax", "azure", "local"];
+/// MiniMax speech models offered in Settings. Turbo is the default: in measurement it
+/// cost the same characters as HD and started playing just as fast.
+pub const SPEECH_MODELS: &[&str] = &["speech-2.8-turbo", "speech-2.8-hd"];
+pub const DEFAULT_SPEECH_MODEL: &str = "speech-2.8-turbo";
 
 /// Ceiling for a single translation call, popup error state included.
 pub const REQUEST_TIMEOUT_SECS: u64 = 45;
@@ -57,9 +64,16 @@ pub struct ProviderMeta {
     pub label: &'static str,
     pub default_base_url: &'static str,
     pub default_model: &'static str,
+    /// The models offered in Settings' dropdown. Empty means "ask the server": the
+    /// generic endpoints serve whatever the user has deployed.
+    pub models: &'static [&'static str],
     pub supports_image: bool,
     pub api: ApiShape,
 }
+
+/// What a MiniMax key can use today. The models endpoint also lists the retired M2
+/// family, so the list is kept here rather than fetched.
+const MINIMAX_MODELS: &[&str] = &["MiniMax-M3", "MiniMax-M3.1-Flash"];
 
 /// The list is what the UI binds to, so adding a provider is a row here plus a
 /// `TranslateProvider` impl.
@@ -75,6 +89,7 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         label: "MiniMax (Anthropic API)",
         default_base_url: "https://api.minimax.io/anthropic",
         default_model: "MiniMax-M3",
+        models: MINIMAX_MODELS,
         supports_image: true,
         api: ApiShape::AnthropicMessages,
     },
@@ -83,6 +98,7 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         label: "MiniMax (OpenAI-compatible API)",
         default_base_url: "https://api.minimax.io/v1",
         default_model: "MiniMax-M3",
+        models: MINIMAX_MODELS,
         supports_image: true,
         api: ApiShape::OpenAiChat,
     },
@@ -91,6 +107,7 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         label: "OpenAI-compatible endpoint",
         default_base_url: "http://localhost:8000/v1",
         default_model: "",
+        models: &[],
         supports_image: true,
         api: ApiShape::OpenAiChat,
     },
@@ -99,6 +116,7 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         label: "Anthropic-compatible endpoint",
         default_base_url: "https://api.anthropic.com",
         default_model: "",
+        models: &[],
         supports_image: true,
         api: ApiShape::AnthropicMessages,
     },
@@ -137,6 +155,22 @@ pub struct Settings {
     /// still surface one, because a silent no-op would be indistinguishable from a
     /// broken hotkey.
     pub rewrite_show_popup: bool,
+    /// Offer a small translate bubble next to a fresh mouse selection (Windows only).
+    pub selection_bubble: bool,
+    /// Which voice reads aloud: "minimax" | "azure" | "local".
+    pub speech_provider: String,
+    pub speech_minimax_model: String,
+    /// Empty means "use the MiniMax translation key".
+    pub speech_minimax_key: String,
+    pub azure_speech_key: String,
+    /// e.g. "southeastasia" — the region the Azure Speech resource was created in.
+    pub azure_speech_region: String,
+    /// When the chosen voice cannot read something, try the other kind: the offline
+    /// voice after a cloud one, or a configured cloud voice after the offline one.
+    pub speech_fallback: bool,
+    /// Voices picked in Settings, keyed "engine:Language" (e.g. "minimax:Vietnamese").
+    /// A language with no entry uses the engine's default voice for it.
+    pub speech_voices: BTreeMap<String, String>,
     /// 0 means "stay until dismissed".
     pub popup_auto_close_ms: u64,
     pub theme: String,
@@ -168,6 +202,14 @@ impl Default for Settings {
             hotkey_screenshot: DEFAULT_HOTKEY_SCREENSHOT.to_string(),
             launch_on_login: false,
             rewrite_show_popup: true,
+            selection_bubble: true,
+            speech_provider: "minimax".to_string(),
+            speech_minimax_model: DEFAULT_SPEECH_MODEL.to_string(),
+            speech_minimax_key: String::new(),
+            azure_speech_key: String::new(),
+            azure_speech_region: String::new(),
+            speech_fallback: true,
+            speech_voices: BTreeMap::new(),
             popup_auto_close_ms: 0,
             theme: "system".to_string(),
         }
@@ -210,6 +252,16 @@ impl Settings {
         if self.hotkey_screenshot.trim().is_empty() {
             self.hotkey_screenshot = defaults.hotkey_screenshot;
         }
+        if !SPEECH_PROVIDERS.contains(&self.speech_provider.as_str()) {
+            self.speech_provider = defaults.speech_provider;
+        }
+        if !SPEECH_MODELS.contains(&self.speech_minimax_model.as_str()) {
+            self.speech_minimax_model = defaults.speech_minimax_model;
+        }
+        self.speech_minimax_key = self.speech_minimax_key.trim().to_string();
+        self.azure_speech_key = self.azure_speech_key.trim().to_string();
+        self.azure_speech_region = self.azure_speech_region.trim().to_lowercase();
+        self.speech_voices.retain(|_, voice| !voice.trim().is_empty());
         if !matches!(self.theme.as_str(), "system" | "light" | "dark") {
             self.theme = defaults.theme;
         }
@@ -253,6 +305,11 @@ fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 pub fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_dir(app)?.join("settings.json"))
+}
+
+/// Where the offline voice is downloaded to.
+pub fn voices_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_dir(app)?.join("voices"))
 }
 
 pub fn log_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -333,7 +390,10 @@ mod tests {
     }
 }
 
+/// Writes settings.json. The API keys go to the system keychain instead — see
+/// `secrets` — so the file on disk never contains them.
 pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {
+    let settings = &crate::secrets::persist(settings)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("could not create {parent:?}: {e}"))?;

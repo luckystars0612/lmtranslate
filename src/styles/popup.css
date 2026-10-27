@@ -108,8 +108,20 @@ body {
   scrollbar-width: thin;
 }
 
-.original {
+.original-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   margin: 0 0 6px;
+}
+
+.original-row .icon-btn {
+  flex: none;
+}
+
+.original {
+  flex: 1;
+  margin: 0;
   font-size: 12px;
   line-height: 1.45;
   color: var(--text-dim);
@@ -194,6 +206,30 @@ body {
   gap: 10px;
   padding-top: 8px;
   border-top: 1px solid var(--hairline);
+}
+
+/* ── Read aloud ──────────────────────────────────────────────────────────── */
+
+.btn--listen {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* While reading, the speaker takes the target accent and its waves pulse. */
+[data-reading="true"] {
+  color: var(--target);
+  border-color: var(--target);
+}
+
+[data-reading="true"] .spk-wave {
+  animation: wave 1.1s ease-in-out infinite;
+}
+
+@keyframes wave {
+  50% {
+    opacity: 0.25;
+  }
 }
 
 .foot-actions {
