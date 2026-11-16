@@ -627,9 +627,17 @@ async fn run_translation(
             );
 
             if translated.trim().is_empty() {
-                settle(
-                    &app,
-                    generation,
+                // A screenshot answered with `{"segments":[]}` means the model found no
+                // text it could read, which is about the crop, not the provider.
+                let popup = if source_kind == "image" && response.segments.is_empty() {
+                    PopupState::error(
+                        &settings,
+                        source_kind,
+                        "No text found",
+                        "The model could not read any text in the selected area.",
+                        "Try again with a little more space around the text.",
+                    )
+                } else {
                     PopupState::error(
                         &settings,
                         source_kind,
@@ -637,11 +645,9 @@ async fn run_translation(
                         "The model returned an empty translation.",
                         "Try again, or pick a different model in Settings -> Provider.",
                     )
-                    .offering_settings(),
-                    &settings,
-                    false,
-                    quiet,
-                );
+                    .offering_settings()
+                };
+                settle(&app, generation, popup, &settings, false, quiet);
                 return;
             }
 

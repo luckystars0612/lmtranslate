@@ -92,7 +92,7 @@ impl PlatformCapture for LinuxWaylandCapture {
         }
 
         let cropped = image::imageops::crop_imm(&full, crop_x, crop_y, crop_w, crop_h).to_image();
-        common::encode_png(common::downscale(cropped))
+        common::encode_png(common::fit_for_model(cropped))
     }
 
     fn replace_selection(&self, _text: &str) -> Result<(), CaptureError> {

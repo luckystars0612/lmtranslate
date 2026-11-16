@@ -35,6 +35,14 @@ const PASTE_SETTLE: Duration = Duration::from_millis(250);
 /// hurting OCR on realistic crops.
 const MAX_IMAGE_EDGE: u32 = 1920;
 
+/// Shortest edge a crop is enlarged to before it is sent. A one-line crop is ~45 px
+/// tall, which a vision encoder sees as a patch or two: MiniMax-M3 answered such crops
+/// with `{"segments":[]}` — no text found — while the same line at ~55 px read fine.
+const MIN_IMAGE_EDGE: u32 = 160;
+
+/// Enlargement cap, so a tiny accidental drag is not blown up into mush.
+const MAX_UPSCALE: u32 = 4;
+
 /// Save the clipboard, send the copy chord, read what landed, put the clipboard back.
 pub fn simulate_copy_and_read(modifier: Key) -> Result<String, CaptureError> {
     let mut clipboard = Clipboard::new()
@@ -251,7 +259,7 @@ pub fn capture_region_xcap(
         .capture_region(rel_x, rel_y, rel_w, rel_h)
         .map_err(|e| CaptureError::Backend(format!("screen capture failed: {e}")))?;
 
-    encode_png(downscale(image))
+    encode_png(fit_for_model(image))
 }
 
 /// A whole monitor through `xcap`, for the crop overlay's frozen frame.
@@ -277,22 +285,44 @@ pub fn capture_frame_xcap(
         .map_err(|e| CaptureError::Backend(format!("screen capture failed: {e}")))
 }
 
-/// Keeps the base64 payload sane for large crops.
-pub fn downscale(image: image::RgbaImage) -> image::RgbaImage {
+/// Sizes a crop for the model: shrinks large ones to keep the payload sane, and
+/// enlarges small ones — a single line of text — so the model can actually read them.
+pub fn fit_for_model(image: image::RgbaImage) -> image::RgbaImage {
     let (w, h) = (image.width(), image.height());
-    let longest = w.max(h);
-    if longest <= MAX_IMAGE_EDGE {
-        return image;
+    match target_size(w, h) {
+        Some((target_w, target_h)) => image::imageops::resize(
+            &image,
+            target_w,
+            target_h,
+            image::imageops::FilterType::CatmullRom,
+        ),
+        None => image,
     }
-    let ratio = MAX_IMAGE_EDGE as f32 / longest as f32;
-    let target_w = ((w as f32 * ratio).round() as u32).max(1);
-    let target_h = ((h as f32 * ratio).round() as u32).max(1);
-    image::imageops::resize(
-        &image,
-        target_w,
-        target_h,
-        image::imageops::FilterType::CatmullRom,
-    )
+}
+
+/// The size `fit_for_model` resizes to, or `None` to leave the image alone.
+fn target_size(w: u32, h: u32) -> Option<(u32, u32)> {
+    let (longest, shortest) = (w.max(h), w.min(h));
+    if shortest == 0 {
+        return None;
+    }
+
+    if longest > MAX_IMAGE_EDGE {
+        let ratio = MAX_IMAGE_EDGE as f32 / longest as f32;
+        let target_w = ((w as f32 * ratio).round() as u32).max(1);
+        let target_h = ((h as f32 * ratio).round() as u32).max(1);
+        return Some((target_w, target_h));
+    }
+
+    if shortest >= MIN_IMAGE_EDGE {
+        return None;
+    }
+    // A whole-number factor keeps glyph strokes evenly weighted. Bounded by the cap,
+    // and by the longest edge so a wide strip never overshoots the payload limit.
+    let wanted = MIN_IMAGE_EDGE.div_ceil(shortest);
+    let room = MAX_IMAGE_EDGE / longest;
+    let factor = wanted.min(MAX_UPSCALE).min(room);
+    (factor > 1).then(|| (w * factor, h * factor))
 }
 
 /// PNG tuned for speed over size: the frozen frame is only ever shown locally, and it
@@ -323,4 +353,41 @@ pub fn encode_png(image: image::RgbaImage) -> Result<Vec<u8>, CaptureError> {
         )
         .map_err(|e| CaptureError::Backend(format!("could not encode the capture: {e}")))?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The crops that came back as `{"segments":[]}`: one line of text, ~45 px tall.
+    #[test]
+    fn a_one_line_crop_is_enlarged() {
+        assert_eq!(target_size(265, 44), Some((1060, 176)));
+        assert_eq!(target_size(293, 52), Some((1172, 208)));
+    }
+
+    #[test]
+    fn a_comfortable_crop_is_left_alone() {
+        assert_eq!(target_size(800, 400), None);
+        assert_eq!(target_size(1920, 160), None);
+    }
+
+    #[test]
+    fn a_wide_strip_never_exceeds_the_payload_cap() {
+        // 4x would be 3600 px wide; only 2x fits under the cap.
+        assert_eq!(target_size(900, 40), Some((1800, 80)));
+        // Not even 2x fits, so it goes as it is.
+        assert_eq!(target_size(1500, 30), None);
+    }
+
+    #[test]
+    fn a_large_crop_is_still_shrunk() {
+        assert_eq!(target_size(3840, 2160), Some((1920, 1080)));
+    }
+
+    #[test]
+    fn a_degenerate_crop_is_not_touched() {
+        assert_eq!(target_size(0, 10), None);
+        assert_eq!(target_size(10, 0), None);
+    }
 }

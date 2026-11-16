@@ -317,12 +317,19 @@ pub(super) fn summarise_usage(value: &Value, input_key: &str, output_key: &str) 
 
 #[derive(Deserialize)]
 struct Envelope {
+    /// `None` when the key is absent, so any other JSON object is not mistaken for a
+    /// well-formed answer with nothing in it.
     #[serde(default)]
-    segments: Vec<TranslatedSegment>,
+    segments: Option<Vec<TranslatedSegment>>,
 }
 
 /// Best-effort read of the model's JSON, degrading to a single raw segment rather
 /// than failing the whole translation.
+///
+/// Returns no segments at all when the model answered in the schema but with nothing
+/// in it — `{"segments":[]}`, which is what a vision model says when it cannot read
+/// any text in the image. That must not fall through to the raw fallback, or the
+/// popup shows the JSON itself as the "translation".
 pub fn parse_segments(raw: &str, fallback_original: &str) -> Vec<TranslatedSegment> {
     let cleaned = strip_reasoning(raw);
     let unfenced = strip_fence(cleaned);
@@ -337,17 +344,29 @@ pub fn parse_segments(raw: &str, fallback_original: &str) -> Vec<TranslatedSegme
     blocks.reverse();
     candidates.extend(blocks);
 
+    // Only decided after every candidate has been tried: an empty block may be a schema
+    // quoted in the preamble, with the real answer further on.
+    let mut answered_empty = false;
+
     for candidate in candidates {
-        if let Ok(envelope) = serde_json::from_str::<Envelope>(&candidate) {
-            let segments: Vec<TranslatedSegment> = envelope
-                .segments
-                .into_iter()
-                .filter(|s| !s.translated.trim().is_empty())
-                .collect();
-            if !segments.is_empty() {
-                return segments;
-            }
+        let Ok(Envelope {
+            segments: Some(segments),
+        }) = serde_json::from_str::<Envelope>(&candidate)
+        else {
+            continue;
+        };
+        let segments: Vec<TranslatedSegment> = segments
+            .into_iter()
+            .filter(|s| !s.translated.trim().is_empty())
+            .collect();
+        if !segments.is_empty() {
+            return segments;
         }
+        answered_empty = true;
+    }
+
+    if answered_empty {
+        return Vec::new();
     }
 
     // Note this falls back to the *cleaned* text: if the JSON cannot be read at all,
@@ -562,6 +581,28 @@ mod tests {
         let raw = "<think>deliberating</think>Chào buổi sáng";
         let segments = parse_segments(raw, "Good morning");
         assert_eq!(segments[0].translated, "Chào buổi sáng");
+    }
+
+    /// The regression that showed `{"segments":[]}` in the popup as the translation:
+    /// a well-formed empty answer must stay empty, not become a raw segment.
+    #[test]
+    fn an_empty_answer_is_not_shown_as_text() {
+        assert!(parse_segments(r#"{"segments":[]}"#, "").is_empty());
+        assert!(parse_segments(r#"{"segments":[{"translated":"  "}]}"#, "").is_empty());
+    }
+
+    #[test]
+    fn an_empty_schema_quote_does_not_hide_the_real_answer() {
+        let raw = "Shape: {\"segments\":[]}\n{\"segments\":[{\"translated\":\"Chào\"}]}";
+        assert_eq!(parse_segments(raw, "Hi")[0].translated, "Chào");
+    }
+
+    /// Any other JSON object is still not an answer, so the raw fallback stands.
+    #[test]
+    fn json_without_segments_still_falls_back() {
+        let segments = parse_segments(r#"{"text":"Chào"}"#, "Hi");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].translated, r#"{"text":"Chào"}"#);
     }
 
     #[test]

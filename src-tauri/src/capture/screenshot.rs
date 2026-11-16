@@ -53,6 +53,6 @@ pub fn crop_frozen(
     }
 
     let cropped = image::imageops::crop_imm(&frame.image, left, top, crop_w, crop_h).to_image();
-    let png = common::encode_png(common::downscale(cropped))?;
+    let png = common::encode_png(common::fit_for_model(cropped))?;
     Ok(STANDARD.encode(png))
 }

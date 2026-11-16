@@ -153,7 +153,7 @@ fn capture_region_x11(
         CaptureError::Backend("could not assemble the captured image".into())
     })?;
 
-    common::encode_png(common::downscale(image))
+    common::encode_png(common::fit_for_model(image))
 }
 
 fn read_primary_selection() -> Result<String, CaptureError> {
